@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>net.jdieter.galliard</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Galliard</name>
+  <summary>A GNOME client for Music Player Daemon</summary>
+  <description>
+    <p>
+      Galliard is a modern GNOME client for Music Player Daemon (MPD). It provides
+      a clean and intuitive interface to control your music collection with
+      features like album art display, playlist management, and media key support.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Browse your music library by artists, albums, and files</li>
+      <li>Queue management</li>
+      <li>Album art display</li>
+      <li>Media key integration</li>
+      <li>System tray support</li>
+      <li>GNOME desktop integration</li>
+    </ul>
+  </description>
+  <developer id="net.jdieter">
+    <name>Jonathan Dieter</name>
+  </developer>
+  <launchable type="desktop-id">net.jdieter.galliard.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <!-- Add screenshot URL when available -->
+    </screenshot>
+  </screenshots>
+  <url type="homepage">https://github.com/jdieter/galliard</url>
+  <url type="bugtracker">https://github.com/jdieter/galliard/issues</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2025-09-23">
+      <description>
+        <p>Initial release</p>
+      </description>
+    </release>
+  </releases>
+</component>

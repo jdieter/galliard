@@ -1,0 +1,38 @@
+app-id: net.jdieter.galliard
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: galliard
+finish-args:
+  # GUI access
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # Network access for MPD connection
+  - --share=network
+  # Notifications
+  - --talk-name=org.freedesktop.Notifications
+  # Media keys and GNOME integration
+  - --talk-name=org.gnome.SettingsDaemon.MediaKeys
+  - --talk-name=org.gnome.SettingsDaemon
+  - --talk-name=org.gnome.Shell
+  # System tray (if needed)
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.StatusNotifierWatcher
+  # MPRIS support (media player remote interface)
+  - --own-name=org.mpris.MediaPlayer2.galliard
+modules:
+  - name: galliard
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - pip3 install --verbose --prefix=${FLATPAK_DEST} .
+      - install -Dm644 net.jdieter.galliard.desktop ${FLATPAK_DEST}/share/applications/net.jdieter.galliard.desktop
+      - install -Dm644 net.jdieter.galliard.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/net.jdieter.galliard.svg
+      - install -Dm644 net.jdieter.galliard.appdata.xml ${FLATPAK_DEST}/share/metainfo/net.jdieter.galliard.appdata.xml
+    sources:
+      - type: dir
+        path: .

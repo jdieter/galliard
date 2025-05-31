@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Galliard
+GenericName=Music Player Client
+Comment=Control your Music Player Daemon server
+Exec=galliard
+Icon=net.jdieter.galliard
+Terminal=false
+Type=Application
+Categories=GNOME;GTK;AudioVideo;Audio;Player;
+StartupNotify=true
+Keywords=Music;MPD;Player;
