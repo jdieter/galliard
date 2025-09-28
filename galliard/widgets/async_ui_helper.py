@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import functools
+from typing import Any
 
 from gi.repository import GLib
 
@@ -71,7 +72,7 @@ class AsyncUIHelper:
         return wrapper
 
     @staticmethod
-    def _run_async_operation(async_func, callback=None, *args, **kwargs):
+    def _run_async_operation(async_func, callback: Any = None, *args, **kwargs):
         """
         Run an asynchronous operation and call a callback when done
 

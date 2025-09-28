@@ -34,11 +34,5 @@ Issues = "https://github.com/jdieter/galliard/issues"
 [tool.setuptools]
 script-files = ["bin/galliard"]
 
-#[project.scripts-files]
-#galliard = "bin/galliard"
-
-#[tool.setuptools.packages.find]
-#include = ["galliard*"]
-
-#[tool.setuptools.package-data]
-#galliard = ["data/**/*"]
+[tool.pyright]
+reportMissingModuleSource = false

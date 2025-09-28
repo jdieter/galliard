@@ -41,8 +41,7 @@ class ContextMenu:
         for item in menu_items:
             if item is None:
                 # Add separator (section break)
-                if len(menu) > 0:
-                    menu.append_section(None, Gio.Menu())
+                menu.append_section(None, Gio.Menu())
                 continue
 
             action_name = item["action"]

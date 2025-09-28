@@ -4,7 +4,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, GLib  # noqa: E402
+from gi.repository import Gtk, GLib, Pango  # noqa: E402
 
 from galliard.utils.album_art import load_album_art  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
@@ -98,7 +98,7 @@ class PlayerControls(Gtk.Box):
         # Song title
         self.song_title_label = Gtk.Label(label="Not playing")
         self.song_title_label.add_css_class("title-4")
-        self.song_title_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        self.song_title_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.song_title_label.set_halign(Gtk.Align.START)
         self.song_title_label.set_hexpand(True)
         song_info_box.append(self.song_title_label)
@@ -115,7 +115,7 @@ class PlayerControls(Gtk.Box):
         artist_album_box.append(self.artist_prefix)
 
         self.song_artist_label = Gtk.Label(label="")
-        self.song_artist_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        self.song_artist_label.set_ellipsize(Pango.EllipsizeMode.END)
         artist_album_box.append(self.song_artist_label)
 
         # Album
@@ -126,7 +126,7 @@ class PlayerControls(Gtk.Box):
         artist_album_box.append(self.album_prefix)
 
         self.song_album_label = Gtk.Label(label="")
-        self.song_album_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        self.song_album_label.set_ellipsize(Pango.EllipsizeMode.END)
         artist_album_box.append(self.song_album_label)
 
         song_info_box.append(artist_album_box)

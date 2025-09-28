@@ -64,8 +64,8 @@ class PreferencesWindow(Gtk.Window):
             page, Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         )
         tab_label = self.notebook.get_tab_label(page)
-        tab_label.append(page_icon)
-        tab_label.append(Gtk.Label(label="Connection"))
+        tab_label.append(page_icon)  # type: ignore
+        tab_label.append(Gtk.Label(label="Connection"))  # type: ignore
 
         # MPD Server Group
         group_frame = Gtk.Frame()
@@ -316,8 +316,8 @@ class PreferencesWindow(Gtk.Window):
             page, Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         )
         tab_label = self.notebook.get_tab_label(page)
-        tab_label.append(page_icon)
-        tab_label.append(Gtk.Label(label="Interface"))
+        tab_label.append(page_icon)  # type: ignore
+        tab_label.append(Gtk.Label(label="Interface"))  # type: ignore
 
         # Appearance Group
         group_label = Gtk.Label()
@@ -477,14 +477,15 @@ class PreferencesWindow(Gtk.Window):
 
             # Apply theme - use GTK settings instead of Adw
             settings = Gtk.Settings.get_default()
-            if themes[selected] == "light":
-                settings.set_property("gtk-application-prefer-dark-theme", False)
-            elif themes[selected] == "dark":
-                settings.set_property("gtk-application-prefer-dark-theme", True)
-            else:
-                # Use system default - this is a bit trickier without Adw
-                # For simplicity we'll default to light mode
-                settings.set_property("gtk-application-prefer-dark-theme", False)
+            if settings:
+                if themes[selected] == "light":
+                    settings.set_property("gtk-application-prefer-dark-theme", False)
+                elif themes[selected] == "dark":
+                    settings.set_property("gtk-application-prefer-dark-theme", True)
+                else:
+                    # Use system default - this is a bit trickier without Adw
+                    # For simplicity we'll default to light mode
+                    settings.set_property("gtk-application-prefer-dark-theme", False)
 
     def on_album_art_changed(self, switch, pspec):
         """Handle album art change"""

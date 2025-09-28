@@ -3,6 +3,7 @@
 import time
 import socket
 import asyncio
+from typing import Any
 
 from gi.repository import GLib, GObject
 from gi.events import GLibEventLoopPolicy
@@ -94,7 +95,7 @@ class MPDConn(GObject.Object):
         self.snapcast_volume = 0
         self.snapcast_clients = []
 
-    async def _execute_command(self, cmd, *args, **kwargs):
+    async def _execute_command(self, cmd, *args, **kwargs) -> Any:
         """Execute MPD command with async lock to prevent concurrent access"""
         if not self.connected and cmd != "connect":
             return None
@@ -106,7 +107,7 @@ class MPDConn(GObject.Object):
                     host, port, timeout, password = args
                     await self.client.connect(host, port, timeout)
                     if password:
-                        await self.client.password(password)
+                        await self.client.password(password)  # type: ignore
                     return True
                 else:
                     # Execute any other MPD command
@@ -190,7 +191,7 @@ class MPDConn(GObject.Object):
             handler_id (int): Signal handler ID returned from connect_signal
         """
         if handler_id:
-            self.disconnect(handler_id)
+            super().disconnect(handler_id)
 
     async def _connect(self, force_reconnect=False):
         """Connect to MPD server asynchronously
@@ -248,7 +249,7 @@ class MPDConn(GObject.Object):
 
                 # Try to create a new client instance
                 try:
-                    self.client = mpd.asyncio.MPDConn()
+                    self.client = mpd.asyncio.MPDClient()
                 except Exception as e:
                     print(f"Error creating new MPD client: {e}")
 
@@ -282,7 +283,7 @@ class MPDConn(GObject.Object):
         self.stop_reconnecting.clear()
         self.reconnect_task = asyncio.create_task(self._reconnection_loop())
 
-    def connect(self):
+    def connect_to_server(self):
         """Connect to MPD server - API method that creates a connect task"""
         if self.connected:
             return True
@@ -301,13 +302,13 @@ class MPDConn(GObject.Object):
         await self._stop_reconnection_task()
 
         try:
-            await self.client.disconnect()
+            await self.client.disconnect()  # pyright: ignore[reportGeneralTypeIssues]
         except Exception:
             pass
 
         self.connected = False
 
-    def disconnect(self):
+    def disconnect_from_server(self):
         """Disconnect from MPD server - API method"""
         if not self.connected:
             return
@@ -659,8 +660,9 @@ class MPDConn(GObject.Object):
         try:
             # Add each song to the command list
             for uri in song_uris:
-                await self.client.add(uri)
-
+                await self.client.add(  # pyright: ignore[reportAttributeAccessIssue]
+                    uri
+                )
             # Emit playlist-changed signal
             GLib.idle_add(self.emit, "playlist-changed")
             return True
@@ -679,7 +681,9 @@ class MPDConn(GObject.Object):
 
         try:
             # Create a new Snapcast server connection
-            server = await snapcast.control.create_server(self.loop, host, port)
+            server = await snapcast.control.create_server(  # type: ignore
+                self.loop, host, port
+            )
             self.snapcast_server = server
 
             # Get available clients
@@ -778,7 +782,9 @@ class MPDConn(GObject.Object):
 
         try:
             # Create a new Snapcast server connection
-            server = await snapcast.control.create_server(self.loop, host, port)
+            server = await snapcast.control.create_server(  # type: ignore
+                self.loop, host, port
+            )
 
             # Extract client information
             clients = [

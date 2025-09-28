@@ -73,9 +73,10 @@ def apply_rounded_corners_to_picture(picture, radius=5):
     css_provider.load_from_data(css.encode())
 
     # Apply the CSS to the widget
-    Gtk.StyleContext.add_provider_for_display(
-        Gdk.Display.get_default(), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-    )
+    if display := Gdk.Display.get_default():
+        Gtk.StyleContext.add_provider_for_display(
+            display, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
 
 def get_default_icon_paintable(size):
@@ -88,14 +89,17 @@ def get_default_icon_paintable(size):
     Returns:
         A Gtk.IconPaintable object
     """
-    return Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).lookup_icon(
-        "audio-x-generic-symbolic",
-        [],
-        size,
-        1,
-        Gtk.TextDirection.NONE,
-        Gtk.IconLookupFlags.FORCE_SYMBOLIC,
-    )
+    if display := Gdk.Display.get_default():
+        return Gtk.IconTheme.get_for_display(display).lookup_icon(
+            "audio-x-generic-symbolic",
+            [],
+            size,
+            1,
+            Gtk.TextDirection.NONE,
+            Gtk.IconLookupFlags.FORCE_SYMBOLIC,
+        )
+    else:
+        return None
 
 
 def set_widget_album_art(image_widget, art_source, size=100, radius=8):

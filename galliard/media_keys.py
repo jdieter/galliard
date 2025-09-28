@@ -6,7 +6,7 @@ from gi.repository import GObject
 
 try:
     gi.require_version("GnomeDesktop", "4.0")
-    from gi.repository import GnomeDesktop  # noqa: E402
+    from gi.repository import GnomeDesktop  # type: ignore  noqa: E402
 
     MEDIA_KEYS_AVAILABLE = True
 except (ValueError, ImportError):
@@ -34,7 +34,7 @@ class MediaKeysManager(GObject.Object):
         """Set up media keys"""
         try:
             # Initialize media keys
-            self.media_keys = GnomeDesktop.MediaKeysProxy.new()
+            self.media_keys = GnomeDesktop.MediaKeysProxy.new()  # type: ignore
             self.media_keys.grab_media_player_keys("GnomeMPDConn", 0)
 
             # Connect signal

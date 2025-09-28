@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# pyright: reportAttributeAccessIssue=false
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -43,12 +45,12 @@ class SystemTrayIcon:
 
     def create_indicator(self):
         """Create app indicator"""
-        self.indicator = AppIndicator.Indicator.new(
+        self.indicator = AppIndicator.Indicator.new(  # type: ignore
             "galliard",
             "audio-x-generic-symbolic",
-            AppIndicator.IndicatorCategory.APPLICATION_STATUS,
+            AppIndicator.IndicatorCategory.APPLICATION_STATUS,  # type: ignore
         )
-        self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+        self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)  # type: ignore
 
         # Create menu
         self.create_menu()
@@ -105,7 +107,8 @@ class SystemTrayIcon:
         menu.show_all()
 
         # Set menu
-        self.indicator.set_menu(menu)
+        if self.indicator:
+            self.indicator.set_menu(menu)
 
     def update_tooltip(self, text):
         """Update tray icon tooltip"""

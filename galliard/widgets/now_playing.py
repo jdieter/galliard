@@ -3,7 +3,7 @@
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, GLib  # noqa: E402
+from gi.repository import Gtk, GLib, Pango  # noqa: E402
 
 from galliard.utils.album_art import load_album_art  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
@@ -69,7 +69,7 @@ class NowPlayingView(Gtk.Box):
         self.title_label = Gtk.Label()
         self.title_label.add_css_class("title-2")
         self.title_label.set_halign(Gtk.Align.START)
-        self.title_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.title_label.set_max_width_chars(40)
         info_box.append(self.title_label)
 
@@ -77,7 +77,7 @@ class NowPlayingView(Gtk.Box):
         self.artist_label = Gtk.Label()
         self.artist_label.add_css_class("title-4")
         self.artist_label.set_halign(Gtk.Align.START)
-        self.artist_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        self.artist_label.set_ellipsize(Pango.EllipsizeMode.END)
         info_box.append(self.artist_label)
 
         # Album with year
@@ -87,7 +87,7 @@ class NowPlayingView(Gtk.Box):
         self.album_label = Gtk.Label()
         self.album_label.add_css_class("title-4")
         self.album_label.set_halign(Gtk.Align.START)
-        self.album_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        self.album_label.set_ellipsize(Pango.EllipsizeMode.END)
         album_box.append(self.album_label)
 
         self.year_label = Gtk.Label()

@@ -30,7 +30,7 @@ class FilesView(Gtk.ScrolledWindow):
     def create_ui(self):
         """Create the file browser UI"""
         # Create a list store for our tree items
-        self.files_store = Gio.ListStore.new(FileItem.__gtype__)
+        self.files_store = Gio.ListStore.new(FileItem)
 
         # Create tree list model to handle the hierarchy
         self.tree_model = Gtk.TreeListModel.new(
@@ -61,7 +61,8 @@ class FilesView(Gtk.ScrolledWindow):
 
         # Hide the table header
         table_header = self.files_tree.get_first_child()
-        table_header.set_visible(False)
+        if table_header:
+            table_header.set_visible(False)
 
         # Connect signals for handling selection and expansion
         self.selection.connect("selection-changed", self._on_file_selection_changed)
@@ -126,11 +127,12 @@ class FilesView(Gtk.ScrolledWindow):
         css_provider.load_from_data(css)
 
         # Add the CSS provider to the display
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
+        if display := Gdk.Display.get_default():
+            Gtk.StyleContext.add_provider_for_display(
+                display,
+                css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            )
 
     def _file_item_setup(self, factory, list_item):
         """Setup function for file items"""
@@ -238,7 +240,7 @@ class FilesView(Gtk.ScrolledWindow):
             return None
 
         # Create a list store for children
-        child_store = Gio.ListStore.new(FileItem.__gtype__)
+        child_store = Gio.ListStore.new(FileItem)
 
         if not file_item.children_loaded:
             # Load actual children asynchronously

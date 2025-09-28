@@ -10,6 +10,7 @@ from galliard.widgets.player_controls import PlayerControls  # noqa: E402
 from galliard.widgets.playlist_view import PlaylistView  # noqa: E402
 from galliard.widgets.library_view import LibraryView  # noqa: E402
 from galliard.widgets.now_playing import NowPlayingView  # noqa: E402
+from galliard.utils import widget_classes  # noqa: E402
 
 
 class MainWindow(Gtk.ApplicationWindow):
@@ -107,7 +108,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.sidebar.set_size_request(180, -1)  # Minimum width for sidebar
 
         # Create sidebar list
-        self.sidebar_list = Gtk.ListBox(
+        self.sidebar_list = widget_classes.ListBox(
             selection_mode=Gtk.SelectionMode.SINGLE,
         )
         self.sidebar_list.add_css_class("navigation-sidebar")
@@ -135,8 +136,7 @@ class MainWindow(Gtk.ApplicationWindow):
         label.set_hexpand(True)
         box.append(label)
 
-        row = Gtk.ListBoxRow(child=box)
-        row.page_name = page_name
+        row = widget_classes.ListBoxRow(child=box, data={"page_name": page_name})
 
         self.sidebar_list.append(row)
 
@@ -145,8 +145,9 @@ class MainWindow(Gtk.ApplicationWindow):
         if row is None:
             return
 
-        page_name = row.page_name
-        self.content_stack.set_visible_child_name(page_name)
+        page_name = row.data.get("page_name", None)
+        if page_name:
+            self.content_stack.set_visible_child_name(page_name)
 
     def connect_signals(self):
         """Connect signals"""
@@ -187,10 +188,11 @@ class MainWindow(Gtk.ApplicationWindow):
 
         # Set keyboard shortcuts
         app = self.get_application()
-        app.set_accels_for_action("win.play-pause", ["space"])
-        app.set_accels_for_action("win.next", ["<primary>Right"])
-        app.set_accels_for_action("win.previous", ["<primary>Left"])
-        app.set_accels_for_action("win.stop", ["<primary>s"])
+        if app:
+            app.set_accels_for_action("win.play-pause", ["space"])
+            app.set_accels_for_action("win.next", ["<primary>Right"])
+            app.set_accels_for_action("win.previous", ["<primary>Left"])
+            app.set_accels_for_action("win.stop", ["<primary>s"])
 
     def on_play_pause(self, action, param):
         """Toggle play/pause"""

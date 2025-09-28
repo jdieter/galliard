@@ -108,7 +108,7 @@ class Galliard(Adw.Application):
 
         # Auto-connect to MPD server if configured
         if self.config.get("auto_connect", True):
-            self.mpd_client.connect()
+            self.mpd_client.connect_to_server()
 
     def on_shutdown(self, app):
         """Handle application shutdown"""
@@ -159,7 +159,7 @@ class Galliard(Adw.Application):
 
     def on_connect(self, action, param):
         """Connect to MPD server"""
-        self.mpd_client.connect()
+        self.mpd_client.connect_to_server()
 
     def on_disconnect(self, action, param):
         """Disconnect from MPD server"""
@@ -167,4 +167,4 @@ class Galliard(Adw.Application):
 
     def disconnect_mpd(self):
         """Safely disconnect from MPD server with proper asyncio handling"""
-        self.mpd_client.disconnect()
+        self.mpd_client.disconnect_from_server()

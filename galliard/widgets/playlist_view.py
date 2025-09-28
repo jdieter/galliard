@@ -9,6 +9,7 @@ from gi.repository import Gtk, Gdk, Adw, GLib, Pango  # noqa: E402
 from galliard.models import Song  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
+from galliard.utils import widget_classes  # noqa: E402
 
 
 class PlaylistView(Gtk.Box):
@@ -140,7 +141,7 @@ class PlaylistView(Gtk.Box):
     def create_playlist_view(self):
         """Create the playlist view widget"""
         # Create list box instead of list view
-        self.playlist_view = Gtk.ListBox()
+        self.playlist_view = widget_classes.ListBox()
         # Change to multiple selection mode
         self.playlist_view.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
         self.playlist_view.add_css_class("boxed-list")
@@ -169,12 +170,12 @@ class PlaylistView(Gtk.Box):
     def on_playlist_item_setup(self, factory, list_item):
         """Set up playlist item widget"""
         # Create row with box layout
-        row = Gtk.ListBoxRow()
+        row = widget_classes.ListBoxRow()
         row.set_activatable(True)
         row.set_selectable(False)  # Don't use built-in selection highlighting
 
         # Store the list_item reference in the row for context menu
-        row.list_item = list_item
+        row.data["list_item"] = list_item
 
         # Main container box
         box = Gtk.Box(
@@ -190,14 +191,16 @@ class PlaylistView(Gtk.Box):
         left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
 
         # Number prefix
-        row.number_label = Gtk.Label()
-        row.number_label.add_css_class("dim-label")
-        left_box.append(row.number_label)
+        row.data["number_label"] = Gtk.Label()
+        row.data["number_label"].add_css_class("dim-label")
+        left_box.append(row.data["number_label"])
 
         # Play indicator
-        row.playing_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
-        row.playing_icon.set_opacity(0)  # Hidden by default
-        left_box.append(row.playing_icon)
+        row.data["playing_icon"] = Gtk.Image.new_from_icon_name(
+            "media-playback-start-symbolic"
+        )
+        row.data["playing_icon"].set_opacity(0)  # Hidden by default
+        left_box.append(row.data["playing_icon"])
 
         box.append(left_box)
 
@@ -206,18 +209,18 @@ class PlaylistView(Gtk.Box):
         content_box.set_hexpand(True)
 
         # Title
-        row.title_label = Gtk.Label(xalign=0)
-        row.title_label.add_css_class("title")
-        row.title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        row.title_label.set_max_width_chars(50)
-        content_box.append(row.title_label)
+        title_label = Gtk.Label(xalign=0)
+        title_label.add_css_class("title")
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_max_width_chars(50)
+        content_box.append(title_label)
 
         # Subtitle
-        row.subtitle_label = Gtk.Label(xalign=0)
-        row.subtitle_label.add_css_class("subtitle")
-        row.subtitle_label.add_css_class("dim-label")
-        row.subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
-        content_box.append(row.subtitle_label)
+        subtitle_label = Gtk.Label(xalign=0)
+        subtitle_label.add_css_class("subtitle")
+        subtitle_label.add_css_class("dim-label")
+        subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
+        content_box.append(subtitle_label)
 
         box.append(content_box)
         row.set_child(box)
@@ -312,8 +315,8 @@ class PlaylistView(Gtk.Box):
         existing_rows = {}
         row = self.playlist_view.get_first_child()
         while row:
-            if hasattr(row, "song") and row.song.data.get("id") is not None:
-                existing_rows[row.song.data.get("id")] = row
+            if "song" in row.data and getattr(row.data["song"], "id", None) is not None:
+                existing_rows[row.data["song"].id] = row
             row = row.get_next_sibling()
 
         # Build a new list of song IDs from the playlist
@@ -323,7 +326,10 @@ class PlaylistView(Gtk.Box):
         row = self.playlist_view.get_first_child()
         while row:
             next_row = row.get_next_sibling()
-            if hasattr(row, "song") and row.song.data.get("id") not in new_song_ids:
+            if (
+                "song" in row.data
+                and getattr(row.data["song"], "id", None) not in new_song_ids
+            ):
                 self.playlist_view.remove(row)
             row = next_row
 
@@ -334,11 +340,11 @@ class PlaylistView(Gtk.Box):
             if song_id in existing_rows:
                 # Update existing row
                 row = existing_rows[song_id]
-                row.position = i
-                row.number_label.set_text(f"{i + 1}")
+                row.data["position"] = i
+                row.data["number_label"].set_text(f"{i + 1}")
 
                 # Reset play indicator (will set it if it's the current song)
-                row.playing_icon.set_opacity(0)
+                row.data["playing_icon"].set_opacity(0)
 
                 # Get current position by counting through siblings
                 current_position = 0
@@ -353,13 +359,13 @@ class PlaylistView(Gtk.Box):
                     self.playlist_view.insert(row, i)
             else:
                 # Add new row
-                song = Song(song_data)
+                song = Song(**song_data)
                 row = self.create_playlist_row(song, i)
                 self.playlist_view.insert(row, i)
 
             # Update the current playing song indicator
             if current_song_id and song_id == current_song_id:
-                row.playing_icon.set_opacity(1)
+                row.data["playing_icon"].set_opacity(1)
 
         # Update status bar
         total_time = sum(float(song.get("time", 0)) for song in new_playlist)
@@ -404,7 +410,7 @@ class PlaylistView(Gtk.Box):
             return
 
         dialog = Adw.MessageDialog(
-            transient_for=self.get_root(),
+            transient_for=self.get_root(),  # pyright: ignore[reportArgumentType]
             title="Save Playlist",
             body="Enter a name for the playlist:",
         )
@@ -464,11 +470,11 @@ class PlaylistView(Gtk.Box):
             selected_rows = [row]
 
         # Get positions of all selected rows
-        selected_positions = [r.position for r in selected_rows]
+        selected_positions = [r.data["position"] for r in selected_rows]
 
         # Determine the last selected row for play action
         last_selected_position = (
-            selected_positions[-1] if selected_positions else row.position
+            selected_positions[-1] if selected_positions else row.data["position"]
         )
 
         # Create menu items
@@ -497,7 +503,7 @@ class PlaylistView(Gtk.Box):
     def on_row_clicked(self, gesture, n_press, x, y, list_item):
         """Handle click on a playlist row"""
         row = None
-        if isinstance(list_item, Gtk.ListBoxRow):
+        if isinstance(list_item, widget_classes.ListBoxRow):
             row = list_item
         else:
             row = list_item.get_child()
@@ -517,8 +523,8 @@ class PlaylistView(Gtk.Box):
 
         if shift_pressed and self.last_selected_row:
             # Range selection with Shift
-            start_pos = self.last_selected_row.position
-            end_pos = row.position
+            start_pos = self.last_selected_row.data["position"]
+            end_pos = row.data["position"]
 
             # Ensure start is before end
             if start_pos > end_pos:
@@ -553,13 +559,9 @@ class PlaylistView(Gtk.Box):
 
     def create_playlist_row(self, song, position):
         """Create a row for a playlist item"""
-        row = Gtk.ListBoxRow()
+        row = widget_classes.ListBoxRow(data={"song": song, "position": position})
         row.set_activatable(True)
         row.set_selectable(True)
-
-        # Store the song data in the row
-        row.song = song
-        row.position = position
 
         # Main container box
         box = Gtk.Box(
@@ -575,14 +577,16 @@ class PlaylistView(Gtk.Box):
         left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
 
         # Number prefix
-        row.number_label = Gtk.Label(label=f"{position + 1}")
-        row.number_label.add_css_class("dim-label")
-        left_box.append(row.number_label)
+        row.data["number_label"] = Gtk.Label(label=f"{position + 1}")
+        row.data["number_label"].add_css_class("dim-label")
+        left_box.append(row.data["number_label"])
 
         # Play indicator
-        row.playing_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
-        row.playing_icon.set_opacity(0)  # Hidden by default
-        left_box.append(row.playing_icon)
+        row.data["playing_icon"] = Gtk.Image.new_from_icon_name(
+            "media-playback-start-symbolic"
+        )
+        row.data["playing_icon"].set_opacity(0)  # Hidden by default
+        left_box.append(row.data["playing_icon"])
 
         box.append(left_box)
 
@@ -592,20 +596,20 @@ class PlaylistView(Gtk.Box):
 
         # Title
         title = song.get_title()
-        row.title_label = Gtk.Label(label=title, xalign=0)
-        row.title_label.add_css_class("title")
-        row.title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        row.title_label.set_max_width_chars(50)
-        content_box.append(row.title_label)
+        title_label = Gtk.Label(label=title, xalign=0)
+        title_label.add_css_class("title")
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_max_width_chars(50)
+        content_box.append(title_label)
 
         # Subtitle
-        artist = song.get_artist()
-        album = song.get_album()
-        row.subtitle_label = Gtk.Label(label=f"{artist} - {album}", xalign=0)
-        row.subtitle_label.add_css_class("subtitle")
-        row.subtitle_label.add_css_class("dim-label")
-        row.subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
-        content_box.append(row.subtitle_label)
+        artist = song.artist
+        album = song.album
+        subtitle_label = Gtk.Label(label=f"{artist} - {album}", xalign=0)
+        subtitle_label.add_css_class("subtitle")
+        subtitle_label.add_css_class("dim-label")
+        subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
+        content_box.append(subtitle_label)
 
         box.append(content_box)
         row.set_child(box)
@@ -644,7 +648,7 @@ class PlaylistView(Gtk.Box):
             return
 
         # Get the adjustment
-        adj = scrolled_window.get_vadjustment()
+        adj = scrolled_window.get_vadjustment()  # type: ignore
         if not adj:
             return
 

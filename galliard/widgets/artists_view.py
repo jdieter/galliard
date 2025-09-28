@@ -30,7 +30,7 @@ class ArtistsView(Gtk.ScrolledWindow):
     def create_ui(self):
         """Create the artists view UI"""
         # Create a list store for our artists
-        self.artists_store = Gio.ListStore.new(Artist.__gtype__)
+        self.artists_store = Gio.ListStore.new(Artist)
 
         # Create tree list model to handle the hierarchy
         self.tree_model = Gtk.TreeListModel.new(
@@ -61,7 +61,8 @@ class ArtistsView(Gtk.ScrolledWindow):
 
         # Hide the table header
         table_header = self.artists_tree.get_first_child()
-        table_header.set_visible(False)
+        if table_header:
+            table_header.set_visible(False)
 
         # Connect signals for handling selection
         self.selection.connect("selection-changed", self._on_selection_changed)
@@ -126,11 +127,12 @@ class ArtistsView(Gtk.ScrolledWindow):
         css_provider.load_from_data(css)
 
         # Add the CSS provider to the display
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
+        if display := Gdk.Display.get_default():
+            Gtk.StyleContext.add_provider_for_display(
+                display,
+                css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            )
 
     def _item_setup(self, factory, list_item):
         """Setup function for tree items (artists, albums, songs)"""
@@ -249,7 +251,7 @@ class ArtistsView(Gtk.ScrolledWindow):
             list_item.image.set_from_icon_name("audio-x-generic-symbolic")
 
             # Display track number and title
-            song_text = item.title
+            song_text = item.get_title()
             if item.track:
                 song_text = f"{item.track}. {song_text}"
             list_item.label.set_text(song_text)
@@ -268,7 +270,7 @@ class ArtistsView(Gtk.ScrolledWindow):
             return None
 
         # Create a list store for albums
-        child_store = Gio.ListStore.new(Album.__gtype__)
+        child_store = Gio.ListStore.new(Album)
 
         if not artist_item.children_loaded:
             # Load albums asynchronously
@@ -398,7 +400,7 @@ class ArtistsView(Gtk.ScrolledWindow):
             return None
 
         # Create a list store for songs
-        songs_store = Gio.ListStore.new(Song.__gtype__)
+        songs_store = Gio.ListStore.new(Song)
 
         if not album_item.songs_loaded and hasattr(album_item, "songs"):
             # Create Song objects from the songs list
@@ -414,7 +416,7 @@ class ArtistsView(Gtk.ScrolledWindow):
                 song = Song(
                     title=song_data.get("title", song_data["file"].split("/")[-1]),
                     artist=song_data.get("artist", album_item.artist),
-                    album=album_item.name,
+                    album=album_item.title,
                     track=track,
                     file=song_data["file"],
                 )
@@ -460,7 +462,7 @@ class ArtistsView(Gtk.ScrolledWindow):
                 # Create children model dynamically if it's an album
                 if not hasattr(item, "children_model"):
                     item.children_model = self._create_album_children_model(item)
-                    tree_list_row.set_children_model(item.children_model)
+                tree_list_row.set_children_model(item.children_model)
 
                 tree_list_row.set_expanded(True)
                 button.set_icon_name("pan-down-symbolic")
