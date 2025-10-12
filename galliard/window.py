@@ -3,156 +3,134 @@
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gio, GLib  # noqa: E402
+gi.require_version("Adw", "1")
+from gi.repository import Gtk, Gio, GLib, Adw
 
-from galliard.widgets.header_bar import HeaderBar  # noqa: E402
-from galliard.widgets.player_controls import PlayerControls  # noqa: E402
-from galliard.widgets.playlist_view import PlaylistView  # noqa: E402
-from galliard.widgets.library_view import LibraryView  # noqa: E402
-from galliard.widgets.now_playing import NowPlayingView  # noqa: E402
-from galliard.utils import widget_classes  # noqa: E402
+from galliard.widgets.header_bar import HeaderBar
+from galliard.widgets.player_controls import PlayerControls
+from galliard.widgets.playlist_view import PlaylistView
+from galliard.widgets.library_view import LibraryView
+from galliard.widgets.now_playing import NowPlayingView
 
 
-class MainWindow(Gtk.ApplicationWindow):
+class MainWindow(Adw.ApplicationWindow):
     """Main window for the Galliard application"""
 
     def __init__(self, application, mpd_client):
         super().__init__(application=application)
 
-        # Store mpd client and application
         self.mpd_client = mpd_client
         self.application = application
         self.config = application.config
 
-        # Set up window properties
+        # Window setup
         self.set_title("Galliard")
         self.set_default_size(900, 600)
         self.set_size_request(600, 400)
-
-        # Setup proper window decorations
-        self.set_titlebar(None)
-        self.set_decorated(False)
-        self.add_css_class("rounded")  # Add rounded class for curved window borders
-        self.add_css_class("csd")  # Client-side decoration for proper GNOME styling
-        self.add_css_class("shadow")  # Add shadow class for the standard drop shadow
-
-        # Create window content
+        self.pages = {}
         self.create_ui()
-
-        # Connect signals
-        self.connect_signals()
-
-        # Setup keyboard shortcuts
         self.setup_keyboard_shortcuts()
 
-        # Handle close request for system tray minimization
+        # Connect signals
+        mpd_client.connect_signal("connected", self.on_mpd_connected)
+        mpd_client.connect_signal("connection-error", self.on_mpd_connection_error)
         self.connect("close-request", self.on_close_request)
 
     def create_ui(self):
         """Create the user interface"""
-        # Create main layout
-        self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.set_child(self.main_box)
+        # Main layout
+        self.toolbar_view = Adw.ToolbarView()
+        self.set_content(self.toolbar_view)
 
-        # Create header bar and make it draggable to move window
+        # Header and controls
         self.header_bar = HeaderBar(self.mpd_client)
-        self.main_box.append(self.header_bar)
-
-        # Create player controls at the top, just below header
         self.player_controls = PlayerControls(self.mpd_client)
-        self.main_box.append(self.player_controls)
+        self.toolbar_view.add_top_bar(self.header_bar)
+        self.toolbar_view.add_top_bar(self.player_controls)
 
-        # Create main split pane that divides sidebar from content
-        self.main_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        self.main_paned.set_vexpand(True)
-        self.main_paned.set_hexpand(True)
-        self.main_box.append(self.main_paned)
+        # Split view
+        self.navigation_split_view = Adw.NavigationSplitView()
+        self.navigation_split_view.set_sidebar_width_fraction(0.25)
+        self.navigation_split_view.set_min_sidebar_width(200)
+        self.navigation_split_view.set_max_sidebar_width(300)
+        self.toolbar_view.set_content(self.navigation_split_view)
 
-        # Create sidebar for navigation
+        # Create sidebar and content
         self.create_sidebar()
-        self.main_paned.set_start_child(self.sidebar)
-
-        # Create stack to hold the different views/panes
-        self.content_stack = Gtk.Stack()
-        self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
-        self.content_stack.set_transition_duration(200)
-        self.content_stack.set_vexpand(True)
-        self.content_stack.set_hexpand(True)
-        self.main_paned.set_end_child(self.content_stack)
-
-        # Create library view
-        self.library_view = LibraryView(self.mpd_client)
-        self.content_stack.add_titled(self.library_view, "library", "Library")
-
-        # Create playlist view
-        self.playlist_view = PlaylistView(self.mpd_client)
-        self.content_stack.add_titled(self.playlist_view, "playlists", "Playlists")
-
-        # Create now playing view
-        self.now_playing = NowPlayingView(self.mpd_client)
-        self.content_stack.add_titled(self.now_playing, "now_playing", "Now Playing")
-
-        # Set reasonable position for the paned division (sidebar width)
-        self.main_paned.set_position(200)
-
-        # Connect sidebar selection signal now that content_stack exists
-        self.sidebar_list.connect("row-selected", self.on_sidebar_item_selected)
-
-        # Select first item by default
-        self.sidebar_list.select_row(self.sidebar_list.get_row_at_index(0))
+        self.create_content()
 
     def create_sidebar(self):
         """Create sidebar navigation"""
-        self.sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.sidebar.add_css_class("sidebar")
-        self.sidebar.set_size_request(180, -1)  # Minimum width for sidebar
+        sidebar_page = Adw.NavigationPage()
+        sidebar_page.set_title("Navigation")
 
-        # Create sidebar list
-        self.sidebar_list = widget_classes.ListBox(
-            selection_mode=Gtk.SelectionMode.SINGLE,
-        )
+        sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar_page.set_child(sidebar_box)
+
+        self.sidebar_list = Gtk.ListBox()
+        self.sidebar_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.sidebar_list.add_css_class("navigation-sidebar")
-        self.sidebar_list.set_vexpand(True)
-        self.sidebar.append(self.sidebar_list)
+        self.sidebar_list.connect("row-selected", self.on_sidebar_item_selected)
+        sidebar_box.append(self.sidebar_list)
 
-        # Create sidebar items
-        self.add_sidebar_item("Library", "media-optical-symbolic", "library")
-        self.add_sidebar_item("Playlists", "view-list-symbolic", "playlists")
-        self.add_sidebar_item("Now Playing", "audio-x-generic-symbolic", "now_playing")
+        # Add navigation items
+        items = [
+            ("Library", "media-optical-symbolic", "library"),
+            ("Playlists", "view-list-symbolic", "playlists"),
+            ("Now Playing", "audio-x-generic-symbolic", "now_playing")
+        ]
 
-    def add_sidebar_item(self, label_text, icon_name, page_name):
-        """Add an item to the sidebar"""
-        # Replace Adw.ActionRow with custom implementation using Gtk.Box
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
+        for title, icon, page_name in items:
+            row = Adw.ActionRow()
+            row.set_title(title)
+            row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+            setattr(row, "page_name", page_name)
+            self.sidebar_list.append(row)
 
-        icon = Gtk.Image.new_from_icon_name(icon_name)
-        box.append(icon)
+        self.navigation_split_view.set_sidebar(sidebar_page)
+        self.sidebar_list.select_row(self.sidebar_list.get_row_at_index(0))
 
-        label = Gtk.Label(label=label_text, xalign=0)
-        label.set_hexpand(True)
-        box.append(label)
+    def create_content(self):
+        """Create main content area"""
+        self.content_navigation = Adw.NavigationView()
 
-        row = widget_classes.ListBoxRow(child=box, data={"page_name": page_name})
+        content_page = Adw.NavigationPage()
+        content_page.set_child(self.content_navigation)
+        self.navigation_split_view.set_content(content_page)
 
-        self.sidebar_list.append(row)
+        # Create pages
+        self.pages = {
+            "library": self.create_page("Library", "library", LibraryView(self.mpd_client)),
+            "playlists": self.create_page("Playlists", "playlists", PlaylistView(self.mpd_client)),
+            "now_playing": self.create_page("Now Playing", "now_playing", NowPlayingView(self.mpd_client))
+        }
+
+        # Store views for easy access
+        self.library_view = self.pages["library"].get_child()
+        self.playlist_view = self.pages["playlists"].get_child()
+        self.now_playing = self.pages["now_playing"].get_child()
+
+        # Add initial page
+        self.content_navigation.add(self.pages["library"])
+
+    def create_page(self, title, tag, child):
+        """Helper to create navigation pages"""
+        page = Adw.NavigationPage()
+        page.set_title(title)
+        page.set_tag(tag)
+        page.set_child(child)
+        return page
 
     def on_sidebar_item_selected(self, list_box, row):
         """Handle sidebar item selection"""
-        if row is None:
+        if not row:
             return
 
-        page_name = row.data.get("page_name", None)
-        if page_name:
-            self.content_stack.set_visible_child_name(page_name)
-
-    def connect_signals(self):
-        """Connect signals"""
-        self.mpd_client.connect_signal("connected", self.on_mpd_connected)
-        self.mpd_client.connect_signal("connection-error", self.on_mpd_connection_error)
+        page_name = row.page_name
+        if page_name in self.pages:
+            visible_page = self.content_navigation.get_visible_page()
+            if not visible_page or visible_page.get_tag() != page_name:
+                self.content_navigation.replace([self.pages[page_name]])
 
     def on_mpd_connected(self, client):
         """Handle MPD connection"""
@@ -161,49 +139,37 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def on_mpd_connection_error(self, client, message):
         """Handle MPD connection error"""
-        # Show the error in player controls instead of displaying a dialog
         GLib.idle_add(self.player_controls.show_connection_error, message)
 
     def setup_keyboard_shortcuts(self):
         """Set up keyboard shortcuts"""
-        # Media key actions
-        actions = [
-            ("play-pause", self.on_play_pause, None),
-            ("next", self.on_next, None),
-            ("previous", self.on_previous, None),
-            ("stop", self.on_stop, None),
+        shortcuts = [
+            ("play-pause", self.on_play_pause, ["space"]),
+            ("next", self.on_next, ["<primary>Right"]),
+            ("previous", self.on_previous, ["<primary>Left"]),
+            ("stop", self.on_stop, ["<primary>s"]),
         ]
 
-        # Create action group
         action_group = Gio.SimpleActionGroup()
+        app = self.get_application()
 
-        # Add actions to group
-        for name, callback, param_type in actions:
-            action = Gio.SimpleAction.new(name, param_type)
+        for name, callback, accels in shortcuts:
+            action = Gio.SimpleAction.new(name, None)
             action.connect("activate", callback)
             action_group.add_action(action)
+            if app:
+                app.set_accels_for_action(f"win.{name}", accels)
 
-        # Insert the action group
         self.insert_action_group("win", action_group)
-
-        # Set keyboard shortcuts
-        app = self.get_application()
-        if app:
-            app.set_accels_for_action("win.play-pause", ["space"])
-            app.set_accels_for_action("win.next", ["<primary>Right"])
-            app.set_accels_for_action("win.previous", ["<primary>Left"])
-            app.set_accels_for_action("win.stop", ["<primary>s"])
 
     def on_play_pause(self, action, param):
         """Toggle play/pause"""
-        if not self.mpd_client.is_connected():
-            return
-
-        status = self.mpd_client.status
-        if status.get("state") == "play":
-            self.mpd_client.pause()
-        else:
-            self.mpd_client.play()
+        if self.mpd_client.is_connected():
+            status = self.mpd_client.status
+            if status.get("state") == "play":
+                self.mpd_client.pause()
+            else:
+                self.mpd_client.play()
 
     def on_next(self, action, param):
         """Play next track"""
@@ -222,16 +188,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def on_close_request(self, window):
         """Handle window close request"""
-        # If minimize to tray is enabled, hide window instead of closing
-        if self.config.get("ui.minimize_to_tray", True):
-            # Check if system tray is available
-            # We can check this by seeing if the application has a system_tray_icon attribute
-            if (
-                hasattr(self.application, "system_tray_icon")
-                and self.application.system_tray_icon
-            ):
-                self.set_visible(False)
-                return True  # Prevent default close behavior
-
-        # Default close behavior
+        if (self.config.get("ui.minimize_to_tray", True) and
+            hasattr(self.application, "system_tray_icon") and
+            self.application.system_tray_icon):
+            self.set_visible(False)
+            return True
         return False

@@ -9,8 +9,6 @@ from gi.repository import Gtk, Gdk, Adw, GLib, Pango  # noqa: E402
 from galliard.models import Song  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
-from galliard.utils import widget_classes  # noqa: E402
-
 
 class PlaylistView(Gtk.Box):
     """Playlist view widget for Galliard"""
@@ -32,10 +30,8 @@ class PlaylistView(Gtk.Box):
         self.mpd_client.connect_signal("playlist-changed", self.on_playlist_changed)
         self.mpd_client.connect_signal("song-changed", self.on_song_changed)
 
-    def on_key_pressed(self, controller, keyval, keycode, state):
-        """Track modifier keys"""
-        # For key press, we need to add the key to the state
-        # We'll focus only on modifier keys
+    def _update_modifier_state(self, keyval, state, is_press):
+        """Update modifier state for both press and release events"""
         modifier_mask = (
             Gdk.ModifierType.CONTROL_MASK
             | Gdk.ModifierType.SHIFT_MASK
@@ -43,45 +39,39 @@ class PlaylistView(Gtk.Box):
         )
 
         # Handle modifier keys specifically
-        if keyval == Gdk.KEY_Control_L or keyval == Gdk.KEY_Control_R:
-            state |= Gdk.ModifierType.CONTROL_MASK
-        elif keyval == Gdk.KEY_Shift_L or keyval == Gdk.KEY_Shift_R:
-            state |= Gdk.ModifierType.SHIFT_MASK
-        elif keyval == Gdk.KEY_Alt_L or keyval == Gdk.KEY_Alt_R:
-            state |= Gdk.ModifierType.ALT_MASK
+        if keyval in (Gdk.KEY_Control_L, Gdk.KEY_Control_R):
+            if is_press:
+                state |= Gdk.ModifierType.CONTROL_MASK
+            else:
+                state &= ~Gdk.ModifierType.CONTROL_MASK
+        elif keyval in (Gdk.KEY_Shift_L, Gdk.KEY_Shift_R):
+            if is_press:
+                state |= Gdk.ModifierType.SHIFT_MASK
+            else:
+                state &= ~Gdk.ModifierType.SHIFT_MASK
+        elif keyval in (Gdk.KEY_Alt_L, Gdk.KEY_Alt_R):
+            if is_press:
+                state |= Gdk.ModifierType.ALT_MASK
+            else:
+                state &= ~Gdk.ModifierType.ALT_MASK
 
         # Update our tracked state
         self.current_modifiers = state & modifier_mask
+
+    def on_key_pressed(self, controller, keyval, keycode, state):
+        """Track modifier keys"""
+        self._update_modifier_state(keyval, state, True)
 
     def on_key_released(self, controller, keyval, keycode, state):
         """Track modifier keys"""
-        # For key release, we need to remove the key from the state
-        modifier_mask = (
-            Gdk.ModifierType.CONTROL_MASK
-            | Gdk.ModifierType.SHIFT_MASK
-            | Gdk.ModifierType.ALT_MASK
-        )
-
-        # Handle modifier keys specifically
-        if keyval == Gdk.KEY_Control_L or keyval == Gdk.KEY_Control_R:
-            state &= ~Gdk.ModifierType.CONTROL_MASK
-        elif keyval == Gdk.KEY_Shift_L or keyval == Gdk.KEY_Shift_R:
-            state &= ~Gdk.ModifierType.SHIFT_MASK
-        elif keyval == Gdk.KEY_Alt_L or keyval == Gdk.KEY_Alt_R:
-            state &= ~Gdk.ModifierType.ALT_MASK
-
-        # Update our tracked state
-        self.current_modifiers = state & modifier_mask
+        self._update_modifier_state(keyval, state, False)
 
     def create_ui(self):
         """Create the user interface"""
-        # Create header
-        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        header_box.add_css_class("toolbar")
-        header_box.set_margin_start(6)
-        header_box.set_margin_end(6)
-        header_box.set_margin_top(6)
-        header_box.set_margin_bottom(6)
+        # Create header using Adwaita HeaderBar
+        header_bar = Adw.HeaderBar()
+        header_bar.set_title_widget(Gtk.Label(label="Current Playlist"))
+        header_bar.add_css_class("flat")
 
         # Add key controller to track modifier keys
         key_controller = Gtk.EventControllerKey.new()
@@ -89,27 +79,20 @@ class PlaylistView(Gtk.Box):
         key_controller.connect("key-released", self.on_key_released)
         self.add_controller(key_controller)
 
-        # Playlist title
-        playlist_label = Gtk.Label(
-            label="Current Playlist", halign=Gtk.Align.START, hexpand=True
-        )
-        playlist_label.add_css_class("title-4")
-        header_box.append(playlist_label)
-
-        # Add playlist controls
+        # Add playlist controls to header bar
         clear_button = Gtk.Button(
             icon_name="edit-clear-all-symbolic", tooltip_text="Clear playlist"
         )
         clear_button.connect("clicked", self.on_clear_playlist)
-        header_box.append(clear_button)
+        header_bar.pack_end(clear_button)
 
         save_button = Gtk.Button(
             icon_name="document-save-symbolic", tooltip_text="Save playlist"
         )
         save_button.connect("clicked", self.on_save_playlist)
-        header_box.append(save_button)
+        header_bar.pack_end(save_button)
 
-        self.append(header_box)
+        self.append(header_bar)
 
         # Create scrolled window for playlist
         scrolled = Gtk.ScrolledWindow()
@@ -122,7 +105,12 @@ class PlaylistView(Gtk.Box):
 
         self.append(scrolled)
 
-        # Create statusbar
+        # Create statusbar using Adw.StatusPage for empty state or regular box for content
+        self.status_page = Adw.StatusPage()
+        self.status_page.set_title("No Songs")
+        self.status_page.set_description("Your playlist is empty")
+        self.status_page.set_icon_name("folder-music-symbolic")
+
         statusbar = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=3,
@@ -140,8 +128,8 @@ class PlaylistView(Gtk.Box):
 
     def create_playlist_view(self):
         """Create the playlist view widget"""
-        # Create list box instead of list view
-        self.playlist_view = widget_classes.ListBox()
+        # Create list box with Adwaita styling
+        self.playlist_view = Gtk.ListBox()
         # Change to multiple selection mode
         self.playlist_view.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
         self.playlist_view.add_css_class("boxed-list")
@@ -169,76 +157,21 @@ class PlaylistView(Gtk.Box):
 
     def on_playlist_item_setup(self, factory, list_item):
         """Set up playlist item widget"""
-        # Create row with box layout
-        row = widget_classes.ListBoxRow()
+        # Create row with Adwaita action row
+        row = Adw.ActionRow()
         row.set_activatable(True)
-        row.set_selectable(False)  # Don't use built-in selection highlighting
 
         # Store the list_item reference in the row for context menu
-        row.data["list_item"] = list_item
+        setattr(row, "list_item", list_item)
 
-        # Main container box
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=6,
-            margin_start=12,
-            margin_end=12,
-            margin_top=8,
-            margin_bottom=8,
-        )
-
-        # Left side container for number and play icon
-        left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
-
-        # Number prefix
-        row.data["number_label"] = Gtk.Label()
-        row.data["number_label"].add_css_class("dim-label")
-        left_box.append(row.data["number_label"])
-
-        # Play indicator
-        row.data["playing_icon"] = Gtk.Image.new_from_icon_name(
-            "media-playback-start-symbolic"
-        )
-        row.data["playing_icon"].set_opacity(0)  # Hidden by default
-        left_box.append(row.data["playing_icon"])
-
-        box.append(left_box)
-
-        # Text content box (vertical)
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        content_box.set_hexpand(True)
-
-        # Title
-        title_label = Gtk.Label(xalign=0)
-        title_label.add_css_class("title")
-        title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        title_label.set_max_width_chars(50)
-        content_box.append(title_label)
-
-        # Subtitle
-        subtitle_label = Gtk.Label(xalign=0)
-        subtitle_label.add_css_class("subtitle")
-        subtitle_label.add_css_class("dim-label")
-        subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
-        content_box.append(subtitle_label)
-
-        box.append(content_box)
-        row.set_child(box)
+        # Create the common row elements
+        self._setup_row_elements(row)
 
         # Add to list item
         list_item.set_child(row)
 
-        # Double-click handling
-        click_controller = Gtk.GestureClick.new()
-        click_controller.set_button(1)  # Left mouse button
-        click_controller.connect("pressed", self.on_row_clicked, list_item)
-        row.add_controller(click_controller)
-
-        # Right-click handling
-        right_click_controller = Gtk.GestureClick.new()
-        right_click_controller.set_button(3)  # Right mouse button
-        right_click_controller.connect("pressed", self.on_row_right_click, row)
-        row.add_controller(right_click_controller)
+        # Setup event controllers
+        self._setup_row_controllers(row, list_item)
 
     def on_playlist_item_bind(self, factory, list_item):
         """Bind playlist item data to widget"""
@@ -246,16 +179,8 @@ class PlaylistView(Gtk.Box):
         song = list_item.get_item()
         position = list_item.get_position()
 
-        # Set track number
-        row.number_label.set_text(f"{position + 1}")
-
-        # Set song title and artist
-        title = song.get_title()
-        artist = song.get_artist()
-        album = song.get_album()
-
-        row.title_label.set_text(GLib.markup_escape_text(title))
-        row.subtitle_label.set_text(GLib.markup_escape_text(f"{artist} - {album}"))
+        # Use the helper method
+        self._bind_song_data_to_row(row, song, position)
 
         # Check if this is the current song
         if (
@@ -266,6 +191,63 @@ class PlaylistView(Gtk.Box):
             row.playing_icon.set_opacity(1)
         else:
             row.playing_icon.set_opacity(0)
+
+    def _setup_row_elements(self, row):
+        """Setup common row elements (number label, play icon, etc.)"""
+        # Left side container for number and play icon
+        left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        # Number prefix
+        label = Gtk.Label()
+        label.add_css_class("dim-label")
+        label.add_css_class("numeric")
+        left_box.append(label)
+        setattr(row, "number_label", label)
+
+        # Play indicator
+        playing_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
+        playing_icon.set_opacity(0)  # Hidden by default
+        left_box.append(playing_icon)
+        setattr(row, "playing_icon", playing_icon)
+
+        row.add_prefix(left_box)
+
+    def _setup_row_controllers(self, row, list_item_or_row):
+        """Setup event controllers for row interactions"""
+        # Double-click handling
+        click_controller = Gtk.GestureClick.new()
+        click_controller.set_button(1)  # Left mouse button
+        click_controller.connect("pressed", self.on_row_clicked, list_item_or_row)
+        row.add_controller(click_controller)
+
+        # Right-click handling
+        right_click_controller = Gtk.GestureClick.new()
+        right_click_controller.set_button(3)  # Right mouse button
+        right_click_controller.connect("pressed", self.on_row_right_click, row)
+        row.add_controller(right_click_controller)
+
+    def _bind_song_data_to_row(self, row: Adw.ActionRow, song: Song, position: int):
+        """Bind song data to row elements"""
+        # Set track number
+        getattr(row, "number_label").set_text(f"{position + 1}")
+
+        # Set song title and artist using ActionRow properties
+        title = song.get_title()
+        artist = song.artist
+        album = song.album
+
+        row.set_title(GLib.markup_escape_text(title))
+        row.set_subtitle(GLib.markup_escape_text(f"{artist} - {album}"))
+
+        # Check if this is the current song
+        if (
+            self.mpd_client.is_connected()
+            and self.mpd_client.current_song
+            and self.mpd_client.current_song.get("id") == song.id
+        ):
+            getattr(row, "playing_icon").set_opacity(1)
+        else:
+            getattr(row, "playing_icon").set_opacity(0)
 
     def on_mpd_connected(self, client):
         """Handle MPD connection"""
@@ -308,43 +290,44 @@ class PlaylistView(Gtk.Box):
         GLib.idle_add(self._update_playlist_ui, new_playlist, current_song_id)
         return False
 
-    def _update_playlist_ui(self, new_playlist, current_song_id):
+    def _update_playlist_ui(self, new_playlist: list[Song], current_song_id: int | None):
         """Update the playlist UI with new data - runs in main thread"""
 
         # Create dictionary of existing rows by their song ID
         existing_rows = {}
         row = self.playlist_view.get_first_child()
         while row:
-            if "song" in row.data and getattr(row.data["song"], "id", None) is not None:
-                existing_rows[row.data["song"].id] = row
+            if (
+                getattr(row, "song", False)
+                and getattr(getattr(row, "song"), "id", None) is not None
+            ):
+                existing_rows[getattr(row, "song").id] = row
             row = row.get_next_sibling()
 
         # Build a new list of song IDs from the playlist
-        new_song_ids = [song.get("id") for song in new_playlist]
+        new_song_ids = [song.id for song in new_playlist]
 
         # Remove rows that are no longer in the playlist
         row = self.playlist_view.get_first_child()
         while row:
             next_row = row.get_next_sibling()
             if (
-                "song" in row.data
-                and getattr(row.data["song"], "id", None) not in new_song_ids
+                getattr(row, "song", False)
+                and getattr(getattr(row, "song"), "id", None) not in new_song_ids
             ):
                 self.playlist_view.remove(row)
             row = next_row
 
         # Update or add rows in the correct positions
-        for i, song_data in enumerate(new_playlist):
-            song_id = song_data.get("id")
-
-            if song_id in existing_rows:
+        for i, song in enumerate(new_playlist):
+            if song.id in existing_rows:
                 # Update existing row
-                row = existing_rows[song_id]
-                row.data["position"] = i
-                row.data["number_label"].set_text(f"{i + 1}")
+                row = existing_rows[song.id]
+                setattr(row, "position", i)
+                getattr(row, "number_label").set_text(f"{i + 1}")
 
                 # Reset play indicator (will set it if it's the current song)
-                row.data["playing_icon"].set_opacity(0)
+                getattr(row, "playing_icon").set_opacity(0)
 
                 # Get current position by counting through siblings
                 current_position = 0
@@ -359,25 +342,20 @@ class PlaylistView(Gtk.Box):
                     self.playlist_view.insert(row, i)
             else:
                 # Add new row
-                song = Song(**song_data)
                 row = self.create_playlist_row(song, i)
                 self.playlist_view.insert(row, i)
 
             # Update the current playing song indicator
-            if current_song_id and song_id == current_song_id:
-                row.data["playing_icon"].set_opacity(1)
+            if current_song_id and song.id == current_song_id:
+                getattr(row, "playing_icon").set_opacity(1)
 
         # Update status bar
-        total_time = sum(float(song.get("time", 0)) for song in new_playlist)
+        total_time = sum(float(getattr(song, "time", 0)) for song in new_playlist)
         song_count = len(new_playlist)
         self.status_label.set_text(
             f"{song_count} {'song' if song_count == 1 else 'songs'}, "
             f"{self.format_time(total_time)} total time"
         )
-
-        # Schedule scroll to the current song if we found it and not in focus
-        # if current_row and not getattr(self, 'list_has_focus', False):
-        #    GLib.idle_add(lambda: self.scroll_to_row(current_row))
 
         return False  # Remove from idle sources
 
@@ -420,10 +398,15 @@ class PlaylistView(Gtk.Box):
         dialog.set_default_response("save")
         dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
 
-        entry = Gtk.Entry()
+        entry = Adw.EntryRow()
+        entry.set_title("Playlist Name")
         entry.set_margin_top(12)
-        entry.set_activates_default(True)
-        dialog.set_extra_child(entry)
+
+        # Create a preferences group to contain the entry
+        group = Adw.PreferencesGroup()
+        group.add(entry)
+
+        dialog.set_extra_child(group)
 
         dialog.connect("response", self._on_save_playlist_response, entry)
         dialog.present()
@@ -470,11 +453,11 @@ class PlaylistView(Gtk.Box):
             selected_rows = [row]
 
         # Get positions of all selected rows
-        selected_positions = [r.data["position"] for r in selected_rows]
+        selected_positions = [getattr(r, "position") for r in selected_rows]
 
         # Determine the last selected row for play action
         last_selected_position = (
-            selected_positions[-1] if selected_positions else row.data["position"]
+            selected_positions[-1] if len(selected_positions) > 0 else getattr(row, "position", None)
         )
 
         # Create menu items
@@ -503,7 +486,7 @@ class PlaylistView(Gtk.Box):
     def on_row_clicked(self, gesture, n_press, x, y, list_item):
         """Handle click on a playlist row"""
         row = None
-        if isinstance(list_item, widget_classes.ListBoxRow):
+        if isinstance(list_item, Gtk.ListBoxRow):
             row = list_item
         else:
             row = list_item.get_child()
@@ -523,33 +506,31 @@ class PlaylistView(Gtk.Box):
 
         if shift_pressed and self.last_selected_row:
             # Range selection with Shift
-            start_pos = self.last_selected_row.data["position"]
-            end_pos = row.data["position"]
+            start_pos = getattr(self.last_selected_row, "position")
+            end_pos = getattr(row, "position")
 
             # Ensure start is before end
             if start_pos > end_pos:
                 start_pos, end_pos = end_pos, start_pos
 
-            # First clear selection if Ctrl is not pressed
-            if not ctrl_pressed:
-                self.playlist_view.unselect_all()
-
             # Select all rows in the range
             current_row = self.playlist_view.get_first_child()
+
             pos = 0
             while current_row:
                 if start_pos <= pos <= end_pos:
-                    self.playlist_view.select_row(current_row)
+                    if isinstance(current_row, Gtk.ListBoxRow):
+                        self.playlist_view.select_row(current_row)
                 pos += 1
                 current_row = current_row.get_next_sibling()
 
         elif ctrl_pressed:
             # Toggle selection with Ctrl
-            if self.playlist_view.is_selected(row):
+            if row in self.playlist_view.get_selected_rows():
                 self.playlist_view.unselect_row(row)
             else:
                 self.playlist_view.select_row(row)
-            self.last_selected_row = row
+                self.last_selected_row = row
 
         else:
             # Regular click - select only this row
@@ -559,72 +540,20 @@ class PlaylistView(Gtk.Box):
 
     def create_playlist_row(self, song, position):
         """Create a row for a playlist item"""
-        row = widget_classes.ListBoxRow(data={"song": song, "position": position})
+        # Use Adwaita ActionRow for better integration
+        row = Adw.ActionRow()
+        setattr(row, "song", song)
+        setattr(row, "position", position)
         row.set_activatable(True)
-        row.set_selectable(True)
 
-        # Main container box
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=6,
-            margin_start=12,
-            margin_end=12,
-            margin_top=8,
-            margin_bottom=8,
-        )
+        # Create the common row elements
+        self._setup_row_elements(row)
 
-        # Left side container for number and play icon
-        left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+        # Set song data
+        self._bind_song_data_to_row(row, song, position)
 
-        # Number prefix
-        row.data["number_label"] = Gtk.Label(label=f"{position + 1}")
-        row.data["number_label"].add_css_class("dim-label")
-        left_box.append(row.data["number_label"])
-
-        # Play indicator
-        row.data["playing_icon"] = Gtk.Image.new_from_icon_name(
-            "media-playback-start-symbolic"
-        )
-        row.data["playing_icon"].set_opacity(0)  # Hidden by default
-        left_box.append(row.data["playing_icon"])
-
-        box.append(left_box)
-
-        # Text content box (vertical)
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        content_box.set_hexpand(True)
-
-        # Title
-        title = song.get_title()
-        title_label = Gtk.Label(label=title, xalign=0)
-        title_label.add_css_class("title")
-        title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        title_label.set_max_width_chars(50)
-        content_box.append(title_label)
-
-        # Subtitle
-        artist = song.artist
-        album = song.album
-        subtitle_label = Gtk.Label(label=f"{artist} - {album}", xalign=0)
-        subtitle_label.add_css_class("subtitle")
-        subtitle_label.add_css_class("dim-label")
-        subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
-        content_box.append(subtitle_label)
-
-        box.append(content_box)
-        row.set_child(box)
-
-        # Left-click handling
-        click_controller = Gtk.GestureClick.new()
-        click_controller.set_button(1)
-        click_controller.connect("pressed", self.on_row_clicked, row)
-        row.add_controller(click_controller)
-
-        # Right-click handling
-        right_click_controller = Gtk.GestureClick.new()
-        right_click_controller.set_button(3)  # Right mouse button
-        right_click_controller.connect("pressed", self.on_row_right_click, row)
-        row.add_controller(right_click_controller)
+        # Setup event controllers for standalone row
+        self._setup_row_controllers(row, row)
 
         return row
 
@@ -632,6 +561,13 @@ class PlaylistView(Gtk.Box):
         """Handle playlist item activation"""
         if self.mpd_client.is_connected():
             position = row.position
+            AsyncUIHelper.run_async_operation(
+                self.mpd_client.async_play, None, position
+            )
+
+    def _play_selected_item(self, position):
+        """Play the selected item in the playlist"""
+        if self.mpd_client.is_connected() and position is not None:
             AsyncUIHelper.run_async_operation(
                 self.mpd_client.async_play, None, position
             )

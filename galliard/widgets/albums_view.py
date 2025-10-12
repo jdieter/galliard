@@ -24,7 +24,7 @@ class AlbumsView(Gtk.ScrolledWindow):
     def create_ui(self):
         """Create the albums view UI"""
         # Create list store with proper GType
-        self.albums_store = Gio.ListStore(item_type=Album.__gtype__)
+        self.albums_store = Gio.ListStore(item_type=Album)
 
         # Create list view
         self.albums_list = Gtk.ListView.new(

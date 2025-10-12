@@ -7,6 +7,7 @@ from typing import Any
 
 from gi.repository import GLib, GObject
 from gi.events import GLibEventLoopPolicy
+from galliard.models import Song, Album, Artist
 
 try:
     import mpd.asyncio
@@ -423,48 +424,54 @@ class MPDConn(GObject.Object):
         # Update previous status
         self.prev_status = status.copy()
 
-    async def async_get_albums(self):
+    async def async_get_albums(self) -> list[Album]:
         """Get all albums asynchronously"""
         if not self.connected:
             return []
-        return await self._execute_command("list", "album") or []
+        result = await self._execute_command("list", "album") or []
+        return [Album(**item) for item in result]
 
-    async def async_get_artists(self):
+    async def async_get_artists(self) -> list[Artist]:
         """Get all artists asynchronously"""
         if not self.connected:
             return []
-        artists_data = await self._execute_command("list", "artist")
-        return [item["artist"] for item in artists_data] if artists_data else []
+        artists_data = await self._execute_command("list", "artist") or []
+        return [Artist(**item) for item in artists_data]
 
-    async def async_get_songs_by_artist(self, artist):
+    async def async_get_songs_by_artist(self, artist: str) -> list[Song]:
         """Get songs by artist asynchronously"""
         if not self.connected:
             return []
-        return await self._execute_command("find", "artist", artist) or []
+        result = await self._execute_command("find", "artist", artist) or []
+        return [Song(**item) for item in result]
 
-    async def async_get_songs_by_album(self, album):
+    async def async_get_songs_by_album(self, album: str) -> list[Song]:
         """Get songs by album asynchronously"""
         if not self.connected:
             return []
-        return await self._execute_command("find", "album", album) or []
+        result = await self._execute_command("find", "album", album) or []
+        return [Song(**item) for item in result]
 
-    async def async_get_albums_by_artist(self, artist):
+    async def async_get_albums_by_artist(self, artist: str) -> list[Album]:
         """Get albums by artist asynchronously"""
         if not self.connected:
             return []
-        return await self._execute_command("list", "album", "artist", artist) or []
+        result = await self._execute_command("list", "album", "artist", artist) or []
+        return [Album(**item) for item in result]
 
-    async def async_search(self, query):
+    async def async_search(self, query: str) -> list[Song]:
         """Search for songs asynchronously"""
         if not self.connected:
             return []
-        return await self._execute_command("search", "any", query) or []
+        result = await self._execute_command("search", "any", query) or []
+        return [Song(**item) for item in result]
 
-    async def async_get_current_playlist(self):
+    async def async_get_current_playlist(self) -> list[Song]:
         """Get current playlist asynchronously"""
         if not self.connected:
             return []
-        return await self._execute_command("playlistinfo") or []
+        result = await self._execute_command("playlistinfo") or []
+        return [Song(**item) for item in result]
 
     async def async_get_stored_playlists(self):
         """Get stored playlists asynchronously"""
@@ -472,13 +479,14 @@ class MPDConn(GObject.Object):
             return []
         return await self._execute_command("listplaylists") or []
 
-    async def async_get_playlist_songs(self, playlist_name):
+    async def async_get_playlist_songs(self, playlist_name: str) -> list[Song]:
         """Get songs in stored playlist asynchronously"""
         if not self.connected:
             return []
-        return await self._execute_command("listplaylistinfo", playlist_name) or []
+        result = await self._execute_command("listplaylistinfo", playlist_name) or []
+        return [Song(**item) for item in result]
 
-    async def async_get_album_art(self, song_uri):
+    async def async_get_album_art(self, song_uri: str) -> tuple[bytes | None, str | None]:
         """Get album art for a song
 
         Args:
@@ -508,7 +516,7 @@ class MPDConn(GObject.Object):
 
         return None, None
 
-    async def async_get_song_details(self, file_path):
+    async def async_get_song_details(self, file_path: str) -> Song | None:
         """Get detailed information about a song
 
         Args:
@@ -524,7 +532,7 @@ class MPDConn(GObject.Object):
             # Use find command with file filter to get full song details
             result = await self._execute_command("find", "file", file_path)
             if result and len(result) > 0:
-                return result[0]  # Return the first (and should be only) match
+                return Song(**result[0])  # Return the first (and should be only) match
             return None
         except Exception as e:
             print(f"Error getting song details for {file_path}: {e}")
@@ -560,74 +568,74 @@ class MPDConn(GObject.Object):
 
     # New async methods for player control
 
-    async def async_play(self, position=None):
+    async def async_play(self, position: int | None = None):
         """Start playback at optional position asynchronously"""
         if position is not None:
             return await self._execute_command("play", position)
         return await self._execute_command("play")
 
-    async def async_pause(self):
+    async def async_pause(self) -> None:
         """Pause playback asynchronously"""
-        return await self._execute_command("pause")
+        await self._execute_command("pause")
 
-    async def async_stop(self):
+    async def async_stop(self) -> None:
         """Stop playback asynchronously"""
-        return await self._execute_command("stop")
+        await self._execute_command("stop")
 
-    async def async_next(self):
+    async def async_next(self) -> None:
         """Play next track asynchronously"""
-        return await self._execute_command("next")
+        await self._execute_command("next")
 
-    async def async_previous(self):
+    async def async_previous(self) -> None:
         """Play previous track asynchronously"""
-        return await self._execute_command("previous")
+        await self._execute_command("previous")
 
-    async def async_seek(self, position):
+    async def async_seek(self, position: int) -> None:
         """Seek to position in seconds asynchronously"""
-        return await self._execute_command("seekcur", position)
+        await self._execute_command("seekcur", position)
 
-    async def async_delete(self, position):
+    async def async_delete(self, position: int) -> None:
         """Delete song at position from current playlist asynchronously"""
-        return await self._execute_command("delete", position)
+        await self._execute_command("delete", position)
 
-    async def async_clear_playlist(self):
+    async def async_clear_playlist(self) -> None:
         """Clear the current playlist asynchronously"""
-        return await self._execute_command("clear")
+        await self._execute_command("clear")
 
-    async def async_set_volume(self, volume):
+    async def async_set_volume(self, volume: int) -> None:
         """Set volume (0-100) asynchronously"""
         # Check if we're using Snapcast for volume control
         if self.config.get("volume.method", "mpd").lower() == "snapcast":
-            return await self._async_set_snapcast_volume(volume)
+            await self._async_set_snapcast_volume(volume)
         else:
-            return await self._execute_command("setvol", volume)
+            await self._execute_command("setvol", volume)
 
-    async def async_set_random(self, random):
+    async def async_set_random(self, random: str) -> None:
         """Set random playback asynchronously"""
         if not self.connected:
             return None
-        return await self._execute_command("random", "1" if random == "1" else "0")
+        await self._execute_command("random", "1" if random == "1" else "0")
 
-    async def async_set_repeat(self, repeat):
+    async def async_set_repeat(self, repeat: str) -> None:
         """Set repeat mode asynchronously"""
         if not self.connected:
             return None
-        return await self._execute_command("repeat", "1" if repeat == "1" else "0")
+        await self._execute_command("repeat", "1" if repeat == "1" else "0")
 
-    async def async_set_single(self, single):
+    async def async_set_single(self, single: str) -> None:
         """Set single mode asynchronously"""
         if not self.connected:
             return None
-        return await self._execute_command("single", "1" if single == "1" else "0")
+        await self._execute_command("single", "1" if single == "1" else "0")
 
-    async def async_toggle_consume(self):
+    async def async_toggle_consume(self) -> None:
         """Toggle consume mode asynchronously"""
         if not self.connected:
             return None
         consume = int(self.status.get("consume", "0"))
-        return await self._execute_command("consume", 1 - consume)
+        await self._execute_command("consume", 1 - consume)
 
-    async def async_list_directory(self, directory_path=""):
+    async def async_list_directory(self, directory_path: str = "") -> list[dict]:
         """List contents of a directory in the MPD music library asynchronously
 
         Args:
@@ -645,7 +653,7 @@ class MPDConn(GObject.Object):
             print(f"Error listing directory {directory_path}: {e}")
             return []
 
-    async def async_add_songs_to_playlist(self, song_uris):
+    async def async_add_songs_to_playlist(self, song_uris: list[str]) -> bool:
         """Add multiple songs to the current playlist using batch commands
 
         Args:
@@ -670,7 +678,7 @@ class MPDConn(GObject.Object):
             print(f"Error adding songs to playlist: {e}")
             return False
 
-    async def _connect_snapcast(self):
+    async def _connect_snapcast(self) -> bool:
         """Connect to Snapcast server asynchronously"""
         if not HAS_SNAPCAST:
             print("Cannot connect to Snapcast: python-snapcast library not installed")
@@ -706,7 +714,7 @@ class MPDConn(GObject.Object):
             print(f"Error connecting to Snapcast server: {e}")
             return False
 
-    async def _select_snapcast_client(self):
+    async def _select_snapcast_client(self) -> None:
         """Select the Snapcast client to control based on config"""
         if not self.snapcast_server:
             return
@@ -735,7 +743,7 @@ class MPDConn(GObject.Object):
                         "snapcast.client_id", self.snapcast_client.identifier
                     )
 
-    async def _async_set_snapcast_volume(self, volume):
+    async def _async_set_snapcast_volume(self, volume: int) -> bool:
         """Set volume using Snapcast API"""
         if not HAS_SNAPCAST:
             print("Cannot set Snapcast volume: python-snapcast library not installed")
@@ -763,7 +771,7 @@ class MPDConn(GObject.Object):
             await self._connect_snapcast()
             return False
 
-    async def async_get_snapcast_clients(self, host=None, port=None):
+    async def async_get_snapcast_clients(self, host: str | None = None, port: int | None = None) -> bool:
         """Get list of Snapcast clients asynchronously
 
         Args:
@@ -778,7 +786,7 @@ class MPDConn(GObject.Object):
         if host is None:
             host = self.config.get("snapcast.host", "localhost")
         if port is None:
-            port = self.config.get("snapcast.port", 1780)
+            port = int(self.config.get("snapcast.port", 1780))
 
         try:
             # Create a new Snapcast server connection
@@ -811,7 +819,7 @@ class MPDConn(GObject.Object):
             print(f"Error getting Snapcast clients: {e}")
             return False
 
-    async def async_get_snapcast_volume(self):
+    async def async_get_snapcast_volume(self) -> int | None:
         """Get current volume from Snapcast"""
         if not HAS_SNAPCAST:
             print("Cannot get Snapcast volume: python-snapcast library not installed")
@@ -836,7 +844,7 @@ class MPDConn(GObject.Object):
             await self._connect_snapcast()
             return None
 
-    async def _monitor_status(self):
+    async def _monitor_status(self) -> None:
         """Monitor MPD status changes asynchronously"""
         last_song_id = None
         last_playlist_version = None
