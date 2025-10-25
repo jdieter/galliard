@@ -31,6 +31,12 @@ Homepage = "https://github.com/jdieter/galliard"
 Repository = "https://github.com/jdieter/galliard"
 Issues = "https://github.com/jdieter/galliard/issues"
 
+[project.optional-dependencies]
+dev = [
+    "black",
+    "flake8",
+]
+
 [tool.setuptools]
 script-files = ["bin/galliard"]
 
