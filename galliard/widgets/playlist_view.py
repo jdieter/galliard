@@ -4,11 +4,12 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gdk, Adw, GLib, Pango  # noqa: E402
+from gi.repository import Gtk, Gdk, Adw, GLib  # noqa: E402
 
 from galliard.models import Song  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
+
 
 class PlaylistView(Gtk.Box):
     """Playlist view widget for Galliard"""
@@ -290,7 +291,9 @@ class PlaylistView(Gtk.Box):
         GLib.idle_add(self._update_playlist_ui, new_playlist, current_song_id)
         return False
 
-    def _update_playlist_ui(self, new_playlist: list[Song], current_song_id: int | None):
+    def _update_playlist_ui(
+        self, new_playlist: list[Song], current_song_id: int | None
+    ):
         """Update the playlist UI with new data - runs in main thread"""
 
         # Create dictionary of existing rows by their song ID
@@ -457,7 +460,9 @@ class PlaylistView(Gtk.Box):
 
         # Determine the last selected row for play action
         last_selected_position = (
-            selected_positions[-1] if len(selected_positions) > 0 else getattr(row, "position", None)
+            selected_positions[-1]
+            if len(selected_positions) > 0
+            else getattr(row, "position", None)
         )
 
         # Create menu items

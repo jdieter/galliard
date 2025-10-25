@@ -4,13 +4,13 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gio, GLib, Adw
+from gi.repository import Gtk, Gio, GLib, Adw  # noqa: E402
 
-from galliard.widgets.header_bar import HeaderBar
-from galliard.widgets.player_controls import PlayerControls
-from galliard.widgets.playlist_view import PlaylistView
-from galliard.widgets.library_view import LibraryView
-from galliard.widgets.now_playing import NowPlayingView
+from galliard.widgets.header_bar import HeaderBar  # noqa: E402
+from galliard.widgets.player_controls import PlayerControls  # noqa: E402
+from galliard.widgets.playlist_view import PlaylistView  # noqa: E402
+from galliard.widgets.library_view import LibraryView  # noqa: E402
+from galliard.widgets.now_playing import NowPlayingView  # noqa: E402
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -77,7 +77,7 @@ class MainWindow(Adw.ApplicationWindow):
         items = [
             ("Library", "media-optical-symbolic", "library"),
             ("Playlists", "view-list-symbolic", "playlists"),
-            ("Now Playing", "audio-x-generic-symbolic", "now_playing")
+            ("Now Playing", "audio-x-generic-symbolic", "now_playing"),
         ]
 
         for title, icon, page_name in items:
@@ -100,9 +100,15 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Create pages
         self.pages = {
-            "library": self.create_page("Library", "library", LibraryView(self.mpd_client)),
-            "playlists": self.create_page("Playlists", "playlists", PlaylistView(self.mpd_client)),
-            "now_playing": self.create_page("Now Playing", "now_playing", NowPlayingView(self.mpd_client))
+            "library": self.create_page(
+                "Library", "library", LibraryView(self.mpd_client)
+            ),
+            "playlists": self.create_page(
+                "Playlists", "playlists", PlaylistView(self.mpd_client)
+            ),
+            "now_playing": self.create_page(
+                "Now Playing", "now_playing", NowPlayingView(self.mpd_client)
+            ),
         }
 
         # Store views for easy access
@@ -188,9 +194,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_close_request(self, window):
         """Handle window close request"""
-        if (self.config.get("ui.minimize_to_tray", True) and
-            hasattr(self.application, "system_tray_icon") and
-            self.application.system_tray_icon):
+        if (
+            self.config.get("ui.minimize_to_tray", True)
+            and hasattr(self.application, "system_tray_icon")
+            and self.application.system_tray_icon
+        ):
             self.set_visible(False)
             return True
         return False

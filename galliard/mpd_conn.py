@@ -486,7 +486,9 @@ class MPDConn(GObject.Object):
         result = await self._execute_command("listplaylistinfo", playlist_name) or []
         return [Song(**item) for item in result]
 
-    async def async_get_album_art(self, song_uri: str) -> tuple[bytes | None, str | None]:
+    async def async_get_album_art(
+        self, song_uri: str
+    ) -> tuple[bytes | None, str | None]:
         """Get album art for a song
 
         Args:
@@ -771,7 +773,9 @@ class MPDConn(GObject.Object):
             await self._connect_snapcast()
             return False
 
-    async def async_get_snapcast_clients(self, host: str | None = None, port: int | None = None) -> bool:
+    async def async_get_snapcast_clients(
+        self, host: str | None = None, port: int | None = None
+    ) -> bool:
         """Get list of Snapcast clients asynchronously
 
         Args:
