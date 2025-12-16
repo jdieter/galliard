@@ -11,15 +11,17 @@ from galliard.widgets.player_controls import PlayerControls  # noqa: E402
 from galliard.widgets.playlist_view import PlaylistView  # noqa: E402
 from galliard.widgets.library_view import LibraryView  # noqa: E402
 from galliard.widgets.now_playing import NowPlayingView  # noqa: E402
+from galliard.widgets.search_results_view import SearchResultsView  # noqa: E402
+from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 
 
 class MainWindow(Adw.ApplicationWindow):
     """Main window for the Galliard application"""
 
-    def __init__(self, application, mpd_client):
+    def __init__(self, application, mpd_conn):
         super().__init__(application=application)
 
-        self.mpd_client = mpd_client
+        self.mpd_conn = mpd_conn
         self.application = application
         self.config = application.config
 
@@ -32,8 +34,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.setup_keyboard_shortcuts()
 
         # Connect signals
-        mpd_client.connect_signal("connected", self.on_mpd_connected)
-        mpd_client.connect_signal("connection-error", self.on_mpd_connection_error)
+        mpd_conn.connect_signal("connected", self.on_mpd_connected)
+        mpd_conn.connect_signal("connection-error", self.on_mpd_connection_error)
         self.connect("close-request", self.on_close_request)
 
     def create_ui(self):
@@ -43,8 +45,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_content(self.toolbar_view)
 
         # Header and controls
-        self.header_bar = HeaderBar(self.mpd_client)
-        self.player_controls = PlayerControls(self.mpd_client)
+        self.header_bar = HeaderBar(self.mpd_conn)
+        self.player_controls = PlayerControls(self.mpd_conn)
         self.toolbar_view.add_top_bar(self.header_bar)
         self.toolbar_view.add_top_bar(self.player_controls)
 
@@ -53,11 +55,57 @@ class MainWindow(Adw.ApplicationWindow):
         self.navigation_split_view.set_sidebar_width_fraction(0.25)
         self.navigation_split_view.set_min_sidebar_width(200)
         self.navigation_split_view.set_max_sidebar_width(300)
+        self.navigation_split_view.set_show_content(True)
         self.toolbar_view.set_content(self.navigation_split_view)
 
         # Create sidebar and content
         self.create_sidebar()
         self.create_content()
+
+        # Connect search callback
+        def on_search_changed(query, search_type):
+            if query.strip():
+                # Show search results page
+                visible_page = self.content_navigation.get_visible_page()
+                if visible_page and visible_page.get_tag() != "search":
+                    self.page_before_search = visible_page.get_tag()
+                    self.content_navigation.replace([self.pages["search"]])
+
+                # Hide sidebar and player controls
+                self.navigation_split_view.set_collapsed(True)
+                self.player_controls.set_visible(False)
+
+                # Perform search
+                AsyncUIHelper.run_async_operation(
+                    self.search_results_view.perform_search,
+                    None,
+                    query,
+                )
+            else:
+                # Return to previous page when search is cleared
+                visible_page = self.content_navigation.get_visible_page()
+                if visible_page and visible_page.get_tag() == "search":
+                    self.content_navigation.replace([self.pages[self.page_before_search]])
+
+                    # Show sidebar and player controls
+                    self.navigation_split_view.set_collapsed(False)
+                    self.player_controls.set_visible(True)
+
+        self.header_bar.set_search_changed_callback(on_search_changed)
+
+        # Connect to search bar toggle
+        self.header_bar.search_button.connect("toggled", self.on_search_toggled)
+
+    def on_search_toggled(self, button):
+        """Handle search toggle - return to previous page when closing"""
+        if not button.get_active():
+            visible_page = self.content_navigation.get_visible_page()
+            if visible_page and visible_page.get_tag() == "search":
+                self.content_navigation.replace([self.pages[self.page_before_search]])
+
+                # Show sidebar and player controls
+                self.navigation_split_view.set_collapsed(False)
+                self.player_controls.set_visible(True)
 
     def create_sidebar(self):
         """Create sidebar navigation"""
@@ -101,13 +149,16 @@ class MainWindow(Adw.ApplicationWindow):
         # Create pages
         self.pages = {
             "library": self.create_page(
-                "Library", "library", LibraryView(self.mpd_client)
+                "Library", "library", LibraryView(self.mpd_conn)
             ),
             "playlists": self.create_page(
-                "Playlists", "playlists", PlaylistView(self.mpd_client)
+                "Playlists", "playlists", PlaylistView(self.mpd_conn)
             ),
             "now_playing": self.create_page(
-                "Now Playing", "now_playing", NowPlayingView(self.mpd_client)
+                "Now Playing", "now_playing", NowPlayingView(self.mpd_conn)
+            ),
+            "search": self.create_page(
+                "Search Results", "search", SearchResultsView(self.mpd_conn)
             ),
         }
 
@@ -115,9 +166,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.library_view = self.pages["library"].get_child()
         self.playlist_view = self.pages["playlists"].get_child()
         self.now_playing = self.pages["now_playing"].get_child()
+        self.search_results_view = self.pages["search"].get_child()
 
         # Add initial page
         self.content_navigation.add(self.pages["library"])
+
+        # Track the page before search
+        self.page_before_search = "library"
 
     def create_page(self, title, tag, child):
         """Helper to create navigation pages"""
@@ -170,27 +225,27 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_play_pause(self, action, param):
         """Toggle play/pause"""
-        if self.mpd_client.is_connected():
-            status = self.mpd_client.status
+        if self.mpd_conn.is_connected():
+            status = self.mpd_conn.status
             if status.get("state") == "play":
-                self.mpd_client.pause()
+                self.mpd_conn.pause()
             else:
-                self.mpd_client.play()
+                self.mpd_conn.play()
 
     def on_next(self, action, param):
         """Play next track"""
-        if self.mpd_client.is_connected():
-            self.mpd_client.next()
+        if self.mpd_conn.is_connected():
+            self.mpd_conn.next()
 
     def on_previous(self, action, param):
         """Play previous track"""
-        if self.mpd_client.is_connected():
-            self.mpd_client.previous()
+        if self.mpd_conn.is_connected():
+            self.mpd_conn.previous()
 
     def on_stop(self, action, param):
         """Stop playback"""
-        if self.mpd_client.is_connected():
-            self.mpd_client.stop()
+        if self.mpd_conn.is_connected():
+            self.mpd_conn.stop()
 
     def on_close_request(self, window):
         """Handle window close request"""

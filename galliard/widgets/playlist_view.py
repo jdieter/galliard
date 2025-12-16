@@ -9,6 +9,7 @@ from gi.repository import Gtk, Gdk, Adw, GLib  # noqa: E402
 from galliard.models import Song  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
+from galliard.utils.album_art import get_album_art_as_pixbuf  # noqa: E402
 
 
 class PlaylistView(Gtk.Box):
@@ -73,6 +74,7 @@ class PlaylistView(Gtk.Box):
         header_bar = Adw.HeaderBar()
         header_bar.set_title_widget(Gtk.Label(label="Current Playlist"))
         header_bar.add_css_class("flat")
+        header_bar.set_show_end_title_buttons(False)  # Remove close button and other window controls
 
         # Add key controller to track modifier keys
         key_controller = Gtk.EventControllerKey.new()
@@ -87,11 +89,11 @@ class PlaylistView(Gtk.Box):
         clear_button.connect("clicked", self.on_clear_playlist)
         header_bar.pack_end(clear_button)
 
-        save_button = Gtk.Button(
-            icon_name="document-save-symbolic", tooltip_text="Save playlist"
-        )
-        save_button.connect("clicked", self.on_save_playlist)
-        header_bar.pack_end(save_button)
+        #save_button = Gtk.Button(
+        #    icon_name="document-save-symbolic", tooltip_text="Save playlist"
+        #)
+        #save_button.connect("clicked", self.on_save_playlist)
+        #header_bar.pack_end(save_button)
 
         self.append(header_bar)
 
@@ -194,22 +196,36 @@ class PlaylistView(Gtk.Box):
             row.playing_icon.set_opacity(0)
 
     def _setup_row_elements(self, row):
-        """Setup common row elements (number label, play icon, etc.)"""
-        # Left side container for number and play icon
+        """Setup common row elements (album art, number label, play icon, etc.)"""
+        # Left side container for album art, number and play icon
         left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        # Number prefix and play icon container
+        number_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+
+        # Play indicator
+        playing_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
+        playing_icon.set_opacity(0)  # Hidden by default
+        number_box.append(playing_icon)
+        setattr(row, "playing_icon", playing_icon)
 
         # Number prefix
         label = Gtk.Label()
         label.add_css_class("dim-label")
         label.add_css_class("numeric")
-        left_box.append(label)
+        number_box.append(label)
         setattr(row, "number_label", label)
 
-        # Play indicator
-        playing_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
-        playing_icon.set_opacity(0)  # Hidden by default
-        left_box.append(playing_icon)
-        setattr(row, "playing_icon", playing_icon)
+        left_box.append(number_box)
+
+        # Album art
+        album_art = Gtk.Image()
+        album_art.set_size_request(40, 40)
+        album_art.set_pixel_size(40)
+        album_art.set_from_icon_name("audio-x-generic-symbolic")
+
+        left_box.append(album_art)
+        setattr(row, "album_art", album_art)
 
         row.add_prefix(left_box)
 
@@ -240,6 +256,16 @@ class PlaylistView(Gtk.Box):
         row.set_title(GLib.markup_escape_text(title))
         row.set_subtitle(GLib.markup_escape_text(f"{artist} - {album}"))
 
+        # Load album art lazily
+        album_art_widget = getattr(row, "album_art")
+        # Try to load album art asynchronously
+        AsyncUIHelper.run_async_operation(
+            self._load_song_art,
+            lambda result, widget=album_art_widget: self._update_item_art(widget, result),
+            song,
+            task_priority=110,  # Lower priority for album art loading
+        )
+
         # Check if this is the current song
         if (
             self.mpd_client.is_connected()
@@ -249,6 +275,21 @@ class PlaylistView(Gtk.Box):
             getattr(row, "playing_icon").set_opacity(1)
         else:
             getattr(row, "playing_icon").set_opacity(0)
+
+    def _update_item_art(self, album_art_widget: Gtk.Image, pixbuf):
+        """Update album art widget with new pixbuf"""
+        if pixbuf:
+            album_art_widget.set_from_pixbuf(pixbuf)
+            setattr(album_art_widget, "pixbuf_data", pixbuf)
+        else:
+            album_art_widget.set_from_icon_name("audio-x-generic-symbolic")
+            setattr(album_art_widget, "pixbuf_data", None)
+
+    async def _load_song_art(self, song: Song):
+        """Load album art for a specific song"""
+        return await get_album_art_as_pixbuf(
+            self.mpd_client, song.file, 200
+        )
 
     def on_mpd_connected(self, client):
         """Handle MPD connection"""

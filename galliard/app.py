@@ -46,7 +46,7 @@ class Galliard(Adw.Application):
         self.config.load()
 
         # Initialize MPD client
-        self.mpd_client = MPDConn(self.config)
+        self.mpd_conn = MPDConn(self.config)
 
         # Initialize notification manager, system tray icon and media keys
         self.notification_manager = None
@@ -84,7 +84,7 @@ class Galliard(Adw.Application):
         # Initialize notification manager and system tray
         if not self.notification_manager:
             self.notification_manager = NotificationManager(
-                self, self.config, self.mpd_client
+                self, self.config, self.mpd_conn
             )
 
         if (
@@ -92,28 +92,28 @@ class Galliard(Adw.Application):
             and not self.system_tray_icon
             and self.config.get("ui.minimize_to_tray", True)
         ):
-            self.system_tray_icon = SystemTrayIcon(self, self.config, self.mpd_client)
+            self.system_tray_icon = SystemTrayIcon(self, self.config, self.mpd_conn)
 
         # Initialize media keys support
         if MediaKeysManager and not self.media_keys_manager:
-            self.media_keys_manager = MediaKeysManager(self, self.mpd_client)
+            self.media_keys_manager = MediaKeysManager(self, self.mpd_conn)
 
         # Get the active window or create one if necessary
         window = self.props.active_window
         if window is None:
-            window = MainWindow(application=self, mpd_client=self.mpd_client)
+            window = MainWindow(application=self, mpd_conn=self.mpd_conn)
 
         # Present the window to the user
         window.present()
 
         # Auto-connect to MPD server if configured
         if self.config.get("auto_connect", True):
-            self.mpd_client.connect_to_server()
+            self.mpd_conn.connect_to_server()
 
     def on_shutdown(self, app):
         """Handle application shutdown"""
         # Disconnect from MPD
-        if self.mpd_client.is_connected():
+        if self.mpd_conn.is_connected():
             self.disconnect_mpd()
 
         # Clean up notification manager
@@ -159,7 +159,7 @@ class Galliard(Adw.Application):
 
     def on_connect(self, action, param):
         """Connect to MPD server"""
-        self.mpd_client.connect_to_server()
+        self.mpd_conn.connect_to_server()
 
     def on_disconnect(self, action, param):
         """Disconnect from MPD server"""
@@ -167,4 +167,4 @@ class Galliard(Adw.Application):
 
     def disconnect_mpd(self):
         """Safely disconnect from MPD server with proper asyncio handling"""
-        self.mpd_client.disconnect_from_server()
+        self.mpd_conn.disconnect_from_server()

@@ -26,7 +26,6 @@ class Config:
             },
             "ui": {
                 "theme": "system",
-                "show_album_art": True,
                 "show_notifications": True,
                 "minimize_to_tray": True,
             },

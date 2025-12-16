@@ -1,25 +1,40 @@
+import logging
+from collections import OrderedDict
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import GdkPixbuf, Gdk, Gtk  # noqa: E402
 
+_album_art_cache = OrderedDict()
+_MAX_CACHE_SIZE = 2000  # Max number of cached album arts
 
-async def get_album_art_as_pixbuf(mpd_client, audio_file, size):
+async def get_album_art_as_pixbuf(mpd_conn, audio_file, size):
     """
     Get album art for a song and return it as a GdkPixbuf.Pixbuf
 
     Args:
-        mpd_client: The MPD client instance
+        mpd_conn: The MPD client instance
         audio_file: Path to the audio file
         size: Desired size for the album art
     """
-    if not mpd_client.is_connected() or not audio_file:
+    if not mpd_conn.is_connected() or not audio_file:
         return None
+
+    # Check cache first
+    cache_location = mpd_conn.image_cache.get_image_path(audio_file)
+    logging.debug(f"Cache location for {audio_file}: {cache_location}")
+    if cache_location:
+        cache_key = (cache_location, size)
+        if cache_key in _album_art_cache:
+            # Move to end (most recently used)
+            _album_art_cache.move_to_end(cache_key)
+            logging.debug(f"Album art cache hit for {audio_file} at size {size}")
+            return _album_art_cache[cache_key]
 
     try:
         # Get album art data from MPD - await the async call
-        binary_data, _ = await mpd_client.async_get_album_art(audio_file)
-        print(f"Album art data length: {len(binary_data) if binary_data else 'None'}")
+        binary_data, _, key = await mpd_conn.async_get_album_art(audio_file)
+        logging.debug(f"Album art data length: {len(binary_data) if binary_data else 'None'}")
         if binary_data:
             # Create a PixbufLoader and load the image data directly
             loader = GdkPixbuf.PixbufLoader.new()
@@ -44,9 +59,20 @@ async def get_album_art_as_pixbuf(mpd_client, audio_file, size):
                 scaled_pixbuf = pixbuf.scale_simple(
                     new_width, new_height, GdkPixbuf.InterpType.BILINEAR
                 )
+
+                cache_key = (key, size)
+                # Store in cache
+                _album_art_cache[cache_key] = scaled_pixbuf
+                _album_art_cache.move_to_end(cache_key)
+
+                # Enforce cache size limit (remove oldest entry)
+                if len(_album_art_cache) > _MAX_CACHE_SIZE:
+                    _album_art_cache.popitem(last=False)
+
+                logging.debug(f"Album art cached for {audio_file} at size {size} ({len(_album_art_cache)} items in cache)")
                 return scaled_pixbuf
     except Exception as e:
-        print(f"Failed to get album art: {e}")
+        logging.info(f"Failed to get album art: {e}")
 
     return None
 
@@ -133,12 +159,12 @@ def set_widget_album_art(image_widget, art_source, size=100, radius=8):
         image_widget.set_pixel_size(size)
 
 
-async def create_overlay_for_album_art(mpd_client, song, size=100):
+async def create_overlay_for_album_art(mpd_conn, song, size=100):
     """
     Create an overlay with rounded corners for album art
 
     Args:
-        mpd_client: The MPD client instance
+        mpd_conn: The MPD client instance
         song: Dictionary containing song information
         size: Desired size for the album art
 
@@ -150,9 +176,9 @@ async def create_overlay_for_album_art(mpd_client, song, size=100):
 
     # Get album art if available
     scaled_pixbuf = None
-    if song and mpd_client.is_connected():
+    if song and mpd_conn.is_connected():
         scaled_pixbuf = await get_album_art_as_pixbuf(
-            mpd_client, song.get("file"), size
+            mpd_conn, song.get("file"), size
         )
 
     # Set the album art to the picture
@@ -162,12 +188,12 @@ async def create_overlay_for_album_art(mpd_client, song, size=100):
     return overlay
 
 
-async def load_album_art(mpd_client, song, image_widget=None, size=100):
+async def load_album_art(mpd_conn, song, image_widget=None, size=100):
     """
     Load album art for a song and set it to a Gtk.Image or Gtk.Picture widget
 
     Args:
-        mpd_client: The MPD client instance
+        mpd_conn: The MPD client instance
         song: Dictionary containing song information
         image_widget: Gtk.Picture or Gtk.Image widget to display the album art
         size: Desired size for the album art
@@ -179,13 +205,13 @@ async def load_album_art(mpd_client, song, image_widget=None, size=100):
     set_widget_album_art(image_widget, None, size, radius=8)
 
     # Don't try to load album art if no MPD connection or no song
-    if not mpd_client.is_connected() or not song:
+    if not mpd_conn.is_connected() or not song:
         # Ensure we use the default icon when song is None
         return
 
     # Get album art data from MPD and apply it
     try:
-        scaled_pixbuf = await get_album_art_as_pixbuf(mpd_client, song["file"], size)
+        scaled_pixbuf = await get_album_art_as_pixbuf(mpd_conn, song["file"], size)
         if scaled_pixbuf:
             set_widget_album_art(image_widget, scaled_pixbuf, size, radius=8)
     except Exception as e:

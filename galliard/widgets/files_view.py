@@ -396,7 +396,7 @@ class FilesView(Gtk.ScrolledWindow):
 
     def _update_item_art(self, file_item, pixbuf):
         """Update file item with album art"""
-        if pixbuf:
+        if pixbuf and file_item.list_item is not None:
             file_item.pixbuf = pixbuf
             file_item.icon_name = None
             file_item.list_item.image.set_from_pixbuf(pixbuf)
@@ -525,7 +525,7 @@ class FilesView(Gtk.ScrolledWindow):
 
             # Create an image widget for the preview
             self.preview_image = Gtk.Image()
-            self.preview_image.set_size_request(100, 100)
+            self.preview_image.set_size_request(150, 150)
 
             # Add the image to the popover
             self.last_preview_popover.set_child(self.preview_image)

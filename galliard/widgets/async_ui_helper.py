@@ -3,7 +3,6 @@
 import asyncio
 import datetime
 import functools
-from typing import Any
 
 from gi.repository import GLib
 
@@ -21,7 +20,24 @@ async def process_queue():
             break
 
         _, _, async_func, callback, args, kwargs = item
-        AsyncUIHelper._run_async_operation(async_func, callback, *args, **kwargs)
+        try:
+            result = await async_func(*args, **kwargs)
+            if callback:
+                def call_callback(r=result, cb=callback):
+                    cb(r)
+                    return GLib.SOURCE_REMOVE
+                GLib.idle_add(call_callback)
+        except Exception as e:
+            print(f"Error in async operation: {e}")
+            if callback:
+                def call_callback_error(cb=callback):
+                    cb(None)
+                    return GLib.SOURCE_REMOVE
+                GLib.idle_add(call_callback_error)
+        await asyncio.sleep(0)  # Yield control to the event loop
+
+    process_queue_running = False
+    return GLib.SOURCE_REMOVE
 
 
 class AsyncUIHelper:
@@ -52,50 +68,6 @@ class AsyncUIHelper:
             return asyncio.create_task(wrapped_func())
 
         return wrapper
-
-    @staticmethod
-    def update_ui(callback):
-        """
-        Decorator to update UI after an asynchronous operation
-
-        Usage:
-            @AsyncUIHelper.update_ui
-            def handle_result(self, result):
-                # Update UI with result
-        """
-
-        @functools.wraps(callback)
-        def wrapper(self, result):
-            # Schedule the UI update in the GTK main thread
-            GLib.idle_add(lambda: callback(self, result))
-
-        return wrapper
-
-    @staticmethod
-    def _run_async_operation(async_func, callback: Any = None, *args, **kwargs):
-        """
-        Run an asynchronous operation and call a callback when done
-
-        Args:
-            async_func: Async function to call
-            callback: Function to call with the result
-            *args, **kwargs: Arguments to pass to async_func
-        """
-
-        async def wrapped_func():
-            try:
-                result = await async_func(*args, **kwargs)
-                if callback:
-                    GLib.idle_add(lambda: callback(result))
-                return result
-            except Exception as e:
-                print(f"Error in async operation: {e}")
-                if callback:
-                    GLib.idle_add(lambda: callback(None))
-                return None
-
-        # Create and return the task
-        return asyncio.create_task(wrapped_func())
 
     @staticmethod
     def run_glib_idle_async(async_func, *args, **kwargs):

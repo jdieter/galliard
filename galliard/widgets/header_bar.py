@@ -8,10 +8,10 @@ from gi.repository import Gtk, Gio, GLib, Adw  # noqa: E402
 class HeaderBar(Gtk.Box):
     """Header bar widget for Galliard"""
 
-    def __init__(self, mpd_client):
+    def __init__(self, mpd_conn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
 
-        self.mpd_client = mpd_client
+        self.mpd_conn = mpd_conn
 
         # Create the header bar using Adw
         self.header = Adw.HeaderBar()
@@ -35,10 +35,39 @@ class HeaderBar(Gtk.Box):
         self.search_button.connect("toggled", self.on_search_toggled)
         self.header.pack_start(self.search_button)
 
-        # Search bar
+        # Search bar with dropdown and entry
         self.search_bar = Gtk.SearchBar()
+        search_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        # Create dropdown for search type with display text and MPD values
+        self.search_type_dropdown = Gtk.DropDown()
+
+        # Store search type mappings
+        self.search_type_map = {
+            0: "any",
+            1: "title",
+            2: "album",
+            3: "artist",
+            4: "date",
+        }
+
+        search_types = Gtk.StringList()
+        search_types.append("Any")
+        search_types.append("Song")
+        search_types.append("Album")
+        search_types.append("Artist")
+        search_types.append("Year")
+        self.search_type_dropdown.set_model(search_types)
+        self.search_type_dropdown.set_selected(0)  # Default to "Any"
+        search_box.append(self.search_type_dropdown)
+
+        # Create search entry
         self.search_entry = Gtk.SearchEntry()
-        self.search_bar.set_child(self.search_entry)
+        self.search_entry.set_hexpand(True)
+        self.search_entry.connect("search-changed", self.on_search_changed)
+        search_box.append(self.search_entry)
+
+        self.search_bar.set_child(search_box)
         self.search_bar.connect_entry(self.search_entry)
         self.append(self.search_bar)
 
@@ -50,17 +79,16 @@ class HeaderBar(Gtk.Box):
         self.header.pack_end(self.menu_button)
 
         # Connect signals
-        self.mpd_client.connect_signal(
+        self.mpd_conn.connect_signal(
             "connecting-blocked", self.on_mpd_connecting_blocked
         )
-        self.mpd_client.connect_signal("connecting", self.on_mpd_connecting)
-        self.mpd_client.connect_signal("connected", self.on_mpd_connected)
-        self.mpd_client.connect_signal(
+        self.mpd_conn.connect_signal("connecting", self.on_mpd_connecting)
+        self.mpd_conn.connect_signal("connected", self.on_mpd_connected)
+        self.mpd_conn.connect_signal(
             "disconnecting-blocked", self.on_mpd_disconnecting_blocked
         )
-        self.mpd_client.connect_signal("disconnected", self.on_mpd_disconnected)
-        self.mpd_client.connect_signal("song-changed", self.on_song_changed)
-
+        self.mpd_conn.connect_signal("disconnected", self.on_mpd_disconnected)
+        self.mpd_conn.connect_signal("song-changed", self.on_song_changed)
         # Store current subtitle for title updates
         self.current_subtitle = "Not connected"
 
@@ -132,10 +160,10 @@ class HeaderBar(Gtk.Box):
 
     def on_connect_clicked(self, button):
         """Handle connect button click"""
-        if not self.mpd_client.is_connected():
-            self.mpd_client.connect()
+        if not self.mpd_conn.is_connected():
+            self.mpd_conn.connect_to_server()
         else:
-            self.mpd_client.disconnect()
+            self.mpd_conn.disconnect_from_server()
 
     def on_mpd_connecting_blocked(self, client):
         """Handle MPD connecting blocked"""
@@ -164,8 +192,8 @@ class HeaderBar(Gtk.Box):
 
     def on_song_changed(self, client):
         """Handle song change"""
-        if self.mpd_client.is_connected() and self.mpd_client.current_song:
-            song = self.mpd_client.current_song
+        if self.mpd_conn.is_connected() and self.mpd_conn.current_song:
+            song = self.mpd_conn.current_song
             title = song.get("title", "Unknown")
             artist = song.get("artist", "Unknown")
             GLib.idle_add(self.set_subtitle, f"{title} - {artist}")
@@ -173,6 +201,22 @@ class HeaderBar(Gtk.Box):
     def on_search_toggled(self, button):
         """Handle search button toggle"""
         self.search_bar.set_search_mode(button.get_active())
+        if button.get_active():
+            self.search_entry.grab_focus()
+
+    def on_search_changed(self, entry):
+        """Handle search text changes"""
+        query = entry.get_text()
+        selected_index = self.search_type_dropdown.get_selected()
+        search_type = self.search_type_map[selected_index]
+
+        # Emit signal that search has changed
+        if hasattr(self, "search_changed_callback"):
+            self.search_changed_callback(query, search_type)
+
+    def set_search_changed_callback(self, callback):
+        """Set callback for search changes"""
+        self.search_changed_callback = callback
 
     def setup_search_entry(self, window):
         """Set up search entry after window is created"""

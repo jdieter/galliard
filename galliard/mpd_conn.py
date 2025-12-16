@@ -3,11 +3,14 @@
 import time
 import socket
 import asyncio
+import logging
+import hashlib
 from typing import Any
 
 from gi.repository import GLib, GObject
 from gi.events import GLibEventLoopPolicy
 from galliard.models import Song, Album, Artist
+from galliard.cache import ImageCache
 
 try:
     import mpd.asyncio
@@ -19,8 +22,8 @@ except ImportError:
 try:
     import snapcast.control
 except ImportError:
-    print("Warning: python-snapcast library not found.")
-    print("Please install it with: pip install python-snapcast")
+    logging.warning("Warning: python-snapcast library not found.")
+    logging.warning("Please install it with: pip install python-snapcast")
     HAS_SNAPCAST = False
 else:
     HAS_SNAPCAST = True
@@ -86,8 +89,9 @@ class MPDConn(GObject.Object):
         self.reconnect_interval = 5  # seconds between reconnection attempts
         self.auto_reconnect = True
 
-        # Command lock to prevent concurrent MPD commands
-        self.cmd_lock = asyncio.Lock()
+        # Command semaphore to prevent more than 50 simultaneous MPD commands
+        self.high_prio_cmd_sem = asyncio.Semaphore(50)
+        self.low_prio_cmd_sem = asyncio.Semaphore(5)
 
         # Add Snapcast related properties
         self.snapcast_client = None
@@ -96,12 +100,18 @@ class MPDConn(GObject.Object):
         self.snapcast_volume = 0
         self.snapcast_clients = []
 
+        # Image cache using XDG cache directory with in-memory LRU cache
+        self.image_cache = ImageCache()
+
     async def _execute_command(self, cmd, *args, **kwargs) -> Any:
         """Execute MPD command with async lock to prevent concurrent access"""
         if not self.connected and cmd != "connect":
             return None
 
-        async with self.cmd_lock:
+        priority = True
+        if cmd in ["readpicture",]:
+            priority = False
+        async with (self.high_prio_cmd_sem if priority == True else self.low_prio_cmd_sem):
             try:
                 if cmd == "connect":
                     # Special handling for connect
@@ -227,8 +237,7 @@ class MPDConn(GObject.Object):
             # Clear reconnection flag if we were in a reconnection state
             self.stop_reconnecting.set()
 
-            # Start snapcast connection if needed
-            if self.config.get("volume.method", "mpd").lower() == "snapcast":
+            if self.supports_snapcast() and self.config.get("volume.method", "mpd").lower() == "snapcast":
                 await self._connect_snapcast()
 
             return True
@@ -459,11 +468,11 @@ class MPDConn(GObject.Object):
         result = await self._execute_command("list", "album", "artist", artist) or []
         return [Album(**item) for item in result]
 
-    async def async_search(self, query: str) -> list[Song]:
+    async def async_search(self, type: str, query: str) -> list[Song]:
         """Search for songs asynchronously"""
         if not self.connected:
             return []
-        result = await self._execute_command("search", "any", query) or []
+        result = await self._execute_command("search", type, query) or []
         return [Song(**item) for item in result]
 
     async def async_get_current_playlist(self) -> list[Song]:
@@ -488,14 +497,14 @@ class MPDConn(GObject.Object):
 
     async def async_get_album_art(
         self, song_uri: str
-    ) -> tuple[bytes | None, str | None]:
+    ) -> tuple[bytes | None, str | None, str | None]:
         """Get album art for a song
 
         Args:
             song_uri (str): URI of the song to get album art for
 
         Returns:
-            tuple: (binary_data, mime_type) if album art exists, (None, None) otherwise
+            tuple: (binary_data, mime_type, image_path) if album art exists, (None, None, None) otherwise
 
         The binary_data can be loaded into a GdkPixbuf using:
         ```
@@ -506,17 +515,29 @@ class MPDConn(GObject.Object):
         ```
         """
         if not self.connected or not song_uri:
-            return None, None
+            return None, None, None
+
+        # Check cache
+        cached_result = self.image_cache.get(song_uri)
+        logging.debug(f"ImageCache: Checked cache for {song_uri}, found: {bool(cached_result)}")
+        if cached_result:
+            return cached_result
 
         try:
             # MPD 0.22+ supports readpicture command
             result = await self._execute_command("readpicture", song_uri)
             if result and "binary" in result:
-                return result["binary"], result.get("mime", "image/jpeg")
+                binary_data = result["binary"]
+                mime_type = result.get("mime", "image/jpeg")
+
+                # Store to cache
+                key = self.image_cache.put(song_uri, binary_data, mime_type)
+
+                return binary_data, mime_type, key
         except Exception as e:
             print(f"Error getting album art: {e}")
 
-        return None, None
+        return None, None, None
 
     async def async_get_song_details(self, file_path: str) -> Song | None:
         """Get detailed information about a song
@@ -607,8 +628,11 @@ class MPDConn(GObject.Object):
     async def async_set_volume(self, volume: int) -> None:
         """Set volume (0-100) asynchronously"""
         # Check if we're using Snapcast for volume control
-        if self.config.get("volume.method", "mpd").lower() == "snapcast":
-            await self._async_set_snapcast_volume(volume)
+        if self.supports_snapcast():
+            if self.config.get("volume.method", "mpd").lower() == "snapcast":
+                await self._async_set_snapcast_volume(volume)
+            else:
+                await self._execute_command("setvol", volume)
         else:
             await self._execute_command("setvol", volume)
 
@@ -680,10 +704,14 @@ class MPDConn(GObject.Object):
             print(f"Error adding songs to playlist: {e}")
             return False
 
+    def supports_snapcast(self) -> bool:
+        """Check if Snapcast support is available"""
+        return HAS_SNAPCAST
+
     async def _connect_snapcast(self) -> bool:
         """Connect to Snapcast server asynchronously"""
         if not HAS_SNAPCAST:
-            print("Cannot connect to Snapcast: python-snapcast library not installed")
+            logging.warning("Cannot connect to Snapcast: python-snapcast library not installed")
             return False
 
         host = self.config.get("snapcast.host", "localhost")
@@ -867,12 +895,18 @@ class MPDConn(GObject.Object):
                     except asyncio.TimeoutError:
                         continue  # Continue the loop after timeout
 
+                # If using Snapcast for volume, override the volume value
+                if self.supports_snapcast() and self.config.get("volume.method", "mpd").lower() == "snapcast":
+                    # Override volume in status with Snapcast volume
+                    status["volume"] = str(self.snapcast_volume)
+
                 self.status = status
 
                 # If using Snapcast for volume, periodically check its volume
                 current_time = time.time()
                 if (
-                    self.config.get("volume.method", "mpd").lower() == "snapcast"
+                    self.supports_snapcast()
+                    and self.config.get("volume.method", "mpd").lower() == "snapcast"
                     and current_time - last_volume_check > 5
                 ):  # Check every 5 seconds
                     snapcast_volume = await self.async_get_snapcast_volume()
