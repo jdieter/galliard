@@ -316,9 +316,3 @@ class NowPlayingView(Gtk.Box):
         """Handle consume button toggle"""
         if self.mpd_client.is_connected():
             self.mpd_client.toggle_consume()
-
-    def format_time(self, seconds):
-        """Format seconds as mm:ss"""
-        minutes = int(seconds // 60)
-        seconds = int(seconds % 60)
-        return f"{minutes}:{seconds:02d}"

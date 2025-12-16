@@ -166,24 +166,6 @@ class AlbumsView(Gtk.ScrolledWindow):
                 if album:  # Skip empty album names
                     self.albums_store.append(Album(album))
 
-    async def load_albums_by_artist(self, artist):
-        """Load albums by a specific artist"""
-        if not self.mpd_client.is_connected():
-            return
-
-        albums = await self.mpd_client.async_get_album_by_artist(artist)
-        if albums:
-            # Sort using custom sorting
-            albums.sort(key=lambda album: get_sort_key(album))
-
-            # Update list store
-            self.albums_store.remove_all()
-            for album in albums:
-                if album:  # Skip empty album names
-                    album_data = Album(album)
-                    album_data.artist = artist
-                    self.albums_store.append(album_data)
-
     def refresh(self):
         """Refresh the albums view"""
         AsyncUIHelper.run_async_operation(self.load_albums, None)
