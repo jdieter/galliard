@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Image cache management for Galliard MPD client"""
 
-import asyncio
 import hashlib
 import os
 from pathlib import Path
 from typing import Tuple, Optional
 import logging
-
-from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 
 # Mapping from mime types to file extensions
 MIME_TO_EXT = {

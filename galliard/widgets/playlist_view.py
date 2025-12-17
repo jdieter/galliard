@@ -10,6 +10,7 @@ from galliard.models import Song  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
 from galliard.utils.album_art import get_album_art_as_pixbuf  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class PlaylistView(Gtk.Box):
@@ -329,7 +330,7 @@ class PlaylistView(Gtk.Box):
             current_song_id = self.mpd_client.current_song.get("id")
 
         # Update UI in the main thread
-        GLib.idle_add(self._update_playlist_ui, new_playlist, current_song_id)
+        idle_add_once(self._update_playlist_ui, new_playlist, current_song_id)
         return False
 
     def _update_playlist_ui(
@@ -400,8 +401,6 @@ class PlaylistView(Gtk.Box):
             f"{song_count} {'song' if song_count == 1 else 'songs'}, "
             f"{self.format_time(total_time)} total time"
         )
-
-        return False  # Remove from idle sources
 
     def clear_playlist_view(self):
         """Clear the playlist view"""

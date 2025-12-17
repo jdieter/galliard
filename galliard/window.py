@@ -4,7 +4,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gio, GLib, Adw  # noqa: E402
+from gi.repository import Gtk, Gio, Adw  # noqa: E402
 
 from galliard.widgets.header_bar import HeaderBar  # noqa: E402
 from galliard.widgets.player_controls import PlayerControls  # noqa: E402
@@ -13,6 +13,7 @@ from galliard.widgets.library_view import LibraryView  # noqa: E402
 from galliard.widgets.now_playing import NowPlayingView  # noqa: E402
 from galliard.widgets.search_results_view import SearchResultsView  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -195,12 +196,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_mpd_connected(self, client):
         """Handle MPD connection"""
-        GLib.idle_add(self.player_controls.clear_connection_error)
-        GLib.idle_add(self.player_controls.update_controls_sensitivity, True)
+        idle_add_once(self.player_controls.clear_connection_error)
+        idle_add_once(self.player_controls.update_controls_sensitivity, True)
 
     def on_mpd_connection_error(self, client, message):
         """Handle MPD connection error"""
-        GLib.idle_add(self.player_controls.show_connection_error, message)
+        idle_add_once(self.player_controls.show_connection_error, message)
 
     def setup_keyboard_shortcuts(self):
         """Set up keyboard shortcuts"""

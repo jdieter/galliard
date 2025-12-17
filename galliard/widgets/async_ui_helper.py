@@ -3,8 +3,9 @@
 import asyncio
 import datetime
 import functools
+import logging
 
-from gi.repository import GLib
+from galliard.utils.glib import idle_add_once
 
 task_queue = asyncio.PriorityQueue()
 process_queue_running = False
@@ -25,19 +26,17 @@ async def process_queue():
             if callback:
                 def call_callback(r=result, cb=callback):
                     cb(r)
-                    return GLib.SOURCE_REMOVE
-                GLib.idle_add(call_callback)
+                idle_add_once(call_callback)
         except Exception as e:
             print(f"Error in async operation: {e}")
             if callback:
                 def call_callback_error(cb=callback):
                     cb(None)
-                    return GLib.SOURCE_REMOVE
-                GLib.idle_add(call_callback_error)
+                idle_add_once(call_callback_error)
         await asyncio.sleep(0)  # Yield control to the event loop
+        logging.debug('Tasks count: %i', len(asyncio.all_tasks()))
 
     process_queue_running = False
-    return GLib.SOURCE_REMOVE
 
 
 class AsyncUIHelper:
@@ -84,11 +83,9 @@ class AsyncUIHelper:
             # Create and run the async task from within the GTK main loop
             # if asyncio.get_event_loop().is_running():
             asyncio.create_task(async_func(*args, **kwargs))
-            # Return False to remove the idle source
-            return False
 
         # Schedule the task creation to happen in the GTK main loop
-        GLib.idle_add(idle_callback)
+        idle_add_once(idle_callback)
 
     @staticmethod
     def run_async_operation(async_func, callback=None, *args, **kwargs):

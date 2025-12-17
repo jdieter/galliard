@@ -1,11 +1,12 @@
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gio, GLib  # noqa: E402
+from gi.repository import Gtk, Gio  # noqa: E402
 
 from galliard.models import FileItem  # noqa: E402
 from galliard.utils.album_art import get_album_art_as_pixbuf  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class SearchResultsView(Gtk.ScrolledWindow):
@@ -216,7 +217,7 @@ class SearchResultsView(Gtk.ScrolledWindow):
                 songs.append(item)
 
             # Build result tree
-            GLib.idle_add(self._build_results_tree, years, artists, albums, songs)
+            idle_add_once(self._build_results_tree, years, artists, albums, songs)
 
         except Exception as e:
             print(f"Error performing search: {e}")

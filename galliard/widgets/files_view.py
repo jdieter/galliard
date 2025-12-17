@@ -1,13 +1,14 @@
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gdk, Gio, GLib  # noqa: E402
+from gi.repository import Gtk, Gdk, Gio  # noqa: E402
 
 from galliard.models import FileItem  # noqa: E402
 from galliard.utils.sorting import get_sort_key  # noqa: E402
 from galliard.utils.album_art import get_album_art_as_pixbuf  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class FilesView(Gtk.ScrolledWindow):
@@ -266,6 +267,7 @@ class FilesView(Gtk.ScrolledWindow):
 
         return child_store
 
+
     def _update_children(self, parent_item, children, child_store):
         """Update directory with loaded children"""
         parent_item.children = children
@@ -278,8 +280,7 @@ class FilesView(Gtk.ScrolledWindow):
         for child in parent_item.children:
             child_store.append(child)
 
-        # Force UI update
-        GLib.idle_add(lambda: self.files_tree.queue_draw())
+        idle_add_once(self.files_tree.queue_draw)
 
     async def _get_directory_contents(self, directory):
         dir_contents = await self.mpd_client.async_list_directory(directory)
@@ -409,7 +410,7 @@ class FilesView(Gtk.ScrolledWindow):
             file_item.list_item.image.add_controller(motion_controller)
 
             # Notify model that item has changed
-            GLib.idle_add(self.files_tree.queue_draw)
+            idle_add_once(self.files_tree.queue_draw)
 
     def _on_expander_clicked(self, button, list_item):
         """Handle expander button click"""
@@ -475,13 +476,7 @@ class FilesView(Gtk.ScrolledWindow):
             for item in items:
                 self.files_store.append(item)
 
-            # Force UI update
-            def update_ui():
-                print("updating UI with root directory items")
-                self.files_tree.queue_draw()
-                return False
-
-            GLib.idle_add(update_ui)
+            idle_add_once(self.files_tree.queue_draw)
 
         except Exception as e:
             print(f"Error loading root directory: {e}")

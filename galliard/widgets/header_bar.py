@@ -3,6 +3,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Gio, GLib, Adw  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class HeaderBar(Gtk.Box):
@@ -168,27 +169,27 @@ class HeaderBar(Gtk.Box):
     def on_mpd_connecting_blocked(self, client):
         """Handle MPD connecting blocked"""
         print("MPD connecting blocked...")
-        GLib.idle_add(self.update_connection_status, 0)
+        idle_add_once(self.update_connection_status, 0)
 
     def on_mpd_connecting(self, client):
         """Handle MPD connection"""
         print("MPD connecting...")
-        GLib.idle_add(self.update_connection_status, 1)
+        idle_add_once(self.update_connection_status, 1)
 
     def on_mpd_connected(self, client):
         """Handle MPD connection"""
         print("MPD connected")
-        GLib.idle_add(self.update_connection_status, 2)
+        idle_add_once(self.update_connection_status, 2)
 
     def on_mpd_disconnecting_blocked(self, client):
         """Handle MPD disconnection blocked"""
         print("MPD disconnecting blocked...")
-        GLib.idle_add(self.update_connection_status, 3)
+        idle_add_once(self.update_connection_status, 3)
 
     def on_mpd_disconnected(self, client):
         """Handle MPD disconnection"""
         print("MPD disconnected")
-        GLib.idle_add(self.update_connection_status, 4)
+        idle_add_once(self.update_connection_status, 4)
 
     def on_song_changed(self, client):
         """Handle song change"""
@@ -196,7 +197,7 @@ class HeaderBar(Gtk.Box):
             song = self.mpd_conn.current_song
             title = song.get("title", "Unknown")
             artist = song.get("artist", "Unknown")
-            GLib.idle_add(self.set_subtitle, f"{title} - {artist}")
+            self.set_subtitle(f"{title} - {artist}")
 
     def on_search_toggled(self, button):
         """Handle search button toggle"""

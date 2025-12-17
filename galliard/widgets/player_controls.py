@@ -3,11 +3,11 @@
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
 from gi.repository import Gtk, GLib, Pango  # noqa: E402
 
 from galliard.utils.album_art import load_album_art  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class PlayerControls(Gtk.Box):
@@ -38,14 +38,14 @@ class PlayerControls(Gtk.Box):
 
     def create_ui(self):
         """Create the user interface"""
-        # Main container
+        # Main container with clamp for better spacing
         self.main_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=6,
             margin_start=12,
             margin_end=12,
             margin_top=6,
-            margin_bottom=6,
+            margin_bottom=6
         )
         self.append(self.main_box)
 
@@ -95,38 +95,27 @@ class PlayerControls(Gtk.Box):
         song_info_box.set_margin_bottom(4)
         self.main_box.append(song_info_box)
 
-        # Song title
-        self.song_title_label = Gtk.Label(label="Not playing")
+        # Song title using Adw.WindowTitle would be too heavy, keep simple label
+        self.song_title_label = Gtk.Label(label="Not playing", xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
         self.song_title_label.add_css_class("title-4")
-        self.song_title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.song_title_label.set_halign(Gtk.Align.START)
-        self.song_title_label.set_hexpand(True)
         song_info_box.append(self.song_title_label)
 
         # Artist with "By" prefix
-        artist_album_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        artist_album_box.set_halign(Gtk.Align.START)
-        artist_album_box.set_hexpand(True)
+        artist_album_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4, halign=Gtk.Align.START, hexpand=True)
 
         self.artist_prefix = Gtk.Label(label="")
-        self.artist_prefix.add_css_class(
-            "dim-label"
-        )  # Add dim-label class to make it gray
+        self.artist_prefix.add_css_class("dim-label")
         artist_album_box.append(self.artist_prefix)
 
-        self.song_artist_label = Gtk.Label(label="")
-        self.song_artist_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.song_artist_label = Gtk.Label(label="", ellipsize=Pango.EllipsizeMode.END)
         artist_album_box.append(self.song_artist_label)
 
         # Album
         self.album_prefix = Gtk.Label(label="")
-        self.album_prefix.add_css_class(
-            "dim-label"
-        )  # Add dim-label class to make it gray
+        self.album_prefix.add_css_class("dim-label")
         artist_album_box.append(self.album_prefix)
 
-        self.song_album_label = Gtk.Label(label="")
-        self.song_album_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.song_album_label = Gtk.Label(label="", ellipsize=Pango.EllipsizeMode.END)
         artist_album_box.append(self.song_album_label)
 
         song_info_box.append(artist_album_box)
@@ -149,14 +138,11 @@ class PlayerControls(Gtk.Box):
         progress_box.append(self.progress_bar)
 
         # Time labels (moved below progress bar)
-        time_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        time_box.set_halign(Gtk.Align.CENTER)  # Center the time display
+        time_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.CENTER)
 
         self.elapsed_label = Gtk.Label(label="0:00")
         time_box.append(self.elapsed_label)
-
         time_box.append(Gtk.Label(label="/"))
-
         self.total_label = Gtk.Label(label="0:00")
         time_box.append(self.total_label)
 
@@ -193,10 +179,7 @@ class PlayerControls(Gtk.Box):
         control_box.append(self.next_button)
 
         # Add a separator
-        separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        separator.set_margin_start(6)
-        separator.set_margin_end(6)
-        control_box.append(separator)
+        control_box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL, margin_start=6, margin_end=6))
 
         # Repeat button
         if self.mpd_client.is_connected():
@@ -238,30 +221,20 @@ class PlayerControls(Gtk.Box):
 
     def create_volume_control(self):
         """Create volume control with horizontal lines"""
-        volume_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        volume_box.set_margin_start(6)
+        volume_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_start=6)
 
         # Container for the line indicators
-        lines_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        lines_container.set_halign(Gtk.Align.END)
-        lines_container.set_size_request(50, -1)  # Maximum width of 50 pixels
+        lines_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, halign=Gtk.Align.END)
+        lines_container.set_size_request(50, -1)
 
         # Create the five volume level indicators (lines)
         self.volume_lines = []
         for i in range(7):
-            line_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-            line_box.set_halign(Gtk.Align.END)
-
-            # Calculate width based on position (0 = largest, 6 = smallest)
-            width = 50 - (i * 6)  # Decrease by 8px for each line
+            width = 50 - (i * 6)  # Decrease by 6px for each line
+            line_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, halign=Gtk.Align.END)
             line_box.set_size_request(width, 6)
-
-            # Style the line
             line_box.add_css_class("volume-line")
-            # Make inactive by default
             line_box.add_css_class("volume-line-inactive")
-
-            # Add to container and store reference
             lines_container.append(line_box)
             self.volume_lines.append(line_box)
 
@@ -327,18 +300,18 @@ class PlayerControls(Gtk.Box):
     def update_play_button_state(self):
         """Update play button icon based on current state"""
         if not self.mpd_client.is_connected():
-            GLib.idle_add(
+            idle_add_once(
                 self.play_button.set_icon_name, "media-playback-start-symbolic"
             )
             return
 
         state = self.mpd_client.status.get("state", "stop")
         if state == "play":
-            GLib.idle_add(
+            idle_add_once(
                 self.play_button.set_icon_name, "media-playback-pause-symbolic"
             )
         else:
-            GLib.idle_add(
+            idle_add_once(
                 self.play_button.set_icon_name, "media-playback-start-symbolic"
             )
 
@@ -543,19 +516,19 @@ class PlayerControls(Gtk.Box):
 
     def on_mpd_connected(self, client):
         """Handle MPD connection"""
-        GLib.idle_add(self.clear_connection_error)
-        GLib.idle_add(self.update_controls_sensitivity, True)
+        idle_add_once(self.clear_connection_error)
+        idle_add_once(self.update_controls_sensitivity, True)
 
         # Update UI with current state
         if self.mpd_client.current_song:
-            GLib.idle_add(self.on_song_changed, client)
+            idle_add_once(self.on_song_changed, client)
 
         # Update volume control
         if "volume" in self.mpd_client.status:
             try:
                 volume = int(self.mpd_client.status["volume"])
-                GLib.idle_add(self.volume_scale.set_value, volume)
-                GLib.idle_add(self.update_volume_lines, volume)
+                idle_add_once(self.volume_scale.set_value, volume)
+                idle_add_once(self.update_volume_lines, volume)
             except (ValueError, TypeError):
                 pass
 
@@ -570,7 +543,7 @@ class PlayerControls(Gtk.Box):
     def on_state_changed(self, client):
         """Handle playback state change"""
         if not self.mpd_client.is_connected():
-            GLib.idle_add(
+            idle_add_once(
                 self.play_button.set_icon_name, "media-playback-start-symbolic"
             )
             return
@@ -579,23 +552,23 @@ class PlayerControls(Gtk.Box):
         state = status.get("state", "stop")
 
         if state == "play":
-            GLib.idle_add(
+            idle_add_once(
                 self.play_button.set_icon_name, "media-playback-pause-symbolic"
             )
         else:
-            GLib.idle_add(
+            idle_add_once(
                 self.play_button.set_icon_name, "media-playback-start-symbolic"
             )
 
         if state == "stop":
             # Reset elapsed time and progress bar when stopped
-            GLib.idle_add(self.elapsed_label.set_text, "0:00")
-            GLib.idle_add(self.progress_bar.set_value, 0)
+            idle_add_once(self.elapsed_label.set_text, "0:00")
+            idle_add_once(self.progress_bar.set_value, 0)
 
         # Update volume
         try:
             volume = int(status.get("volume", 50))
-            GLib.idle_add(self.volume_scale.set_value, volume)
+            idle_add_once(self.volume_scale.set_value, volume)
         except (ValueError, TypeError):
             pass
 
@@ -612,17 +585,17 @@ class PlayerControls(Gtk.Box):
             if date is not None:
                 album += f" ({date})"
             # Update the detailed song information
-            GLib.idle_add(self.song_title_label.set_text, title)
-            GLib.idle_add(self.artist_prefix.set_text, "By")
-            GLib.idle_add(self.song_artist_label.set_text, artist)
-            GLib.idle_add(self.album_prefix.set_text, "from")
-            GLib.idle_add(self.song_album_label.set_text, album)
+            idle_add_once(self.song_title_label.set_text, title)
+            idle_add_once(self.artist_prefix.set_text, "By")
+            idle_add_once(self.song_artist_label.set_text, artist)
+            idle_add_once(self.album_prefix.set_text, "from")
+            idle_add_once(self.song_album_label.set_text, album)
         else:
-            GLib.idle_add(self.song_title_label.set_text, "Not playing")
-            GLib.idle_add(self.artist_prefix.set_text, "")
-            GLib.idle_add(self.song_artist_label.set_text, "")
-            GLib.idle_add(self.album_prefix.set_text, "")
-            GLib.idle_add(self.song_album_label.set_text, "")
+            idle_add_once(self.song_title_label.set_text, "Not playing")
+            idle_add_once(self.artist_prefix.set_text, "")
+            idle_add_once(self.song_artist_label.set_text, "")
+            idle_add_once(self.album_prefix.set_text, "")
+            idle_add_once(self.song_album_label.set_text, "")
 
         # Use AsyncUIHelper to load album art asynchronously
         AsyncUIHelper.run_async_operation(
@@ -643,20 +616,20 @@ class PlayerControls(Gtk.Box):
             return
 
         if repeat and single:
-            GLib.idle_add(
+            idle_add_once(
                 self.repeat_button.set_icon_name, "media-playlist-repeat-song-symbolic"
             )
-            GLib.idle_add(self.repeat_button.add_css_class, "enabled-mode")
+            idle_add_once(self.repeat_button.add_css_class, "enabled-mode")
         elif repeat:
-            GLib.idle_add(
+            idle_add_once(
                 self.repeat_button.set_icon_name, "media-playlist-repeat-symbolic"
             )
-            GLib.idle_add(self.repeat_button.add_css_class, "enabled-mode")
+            idle_add_once(self.repeat_button.add_css_class, "enabled-mode")
         else:
-            GLib.idle_add(
+            idle_add_once(
                 self.repeat_button.set_icon_name, "media-playlist-repeat-symbolic"
             )
-            GLib.idle_add(self.repeat_button.remove_css_class, "enabled-mode")
+            idle_add_once(self.repeat_button.remove_css_class, "enabled-mode")
 
     def on_random_changed(self, client, random):
         """
@@ -670,15 +643,15 @@ class PlayerControls(Gtk.Box):
             return
 
         if random:
-            GLib.idle_add(
+            idle_add_once(
                 self.random_button.set_icon_name, "media-playlist-shuffle-symbolic"
             )
-            GLib.idle_add(self.random_button.add_css_class, "enabled-mode")
+            idle_add_once(self.random_button.add_css_class, "enabled-mode")
         else:
-            GLib.idle_add(
+            idle_add_once(
                 self.random_button.set_icon_name, "media-playlist-consecutive-symbolic"
             )
-            GLib.idle_add(self.random_button.remove_css_class, "enabled-mode")
+            idle_add_once(self.random_button.remove_css_class, "enabled-mode")
 
     def reset_controls(self, client=None):
         """Reset all controls to their initial state"""
@@ -760,13 +733,13 @@ class PlayerControls(Gtk.Box):
             if total > 0:
                 # Update progress bar
                 percent = (elapsed / total) * 100
-                GLib.idle_add(self.progress_bar.set_value, percent)
+                idle_add_once(self.progress_bar.set_value, percent)
 
                 # Update time labels
                 elapsed_str = self.format_time(elapsed)
                 total_str = self.format_time(total)
-                GLib.idle_add(self.elapsed_label.set_text, elapsed_str)
-                GLib.idle_add(self.total_label.set_text, total_str)
+                idle_add_once(self.elapsed_label.set_text, elapsed_str)
+                idle_add_once(self.total_label.set_text, total_str)
 
         except (ValueError, TypeError, KeyError) as e:
             # Handle any errors gracefully
@@ -784,8 +757,8 @@ class PlayerControls(Gtk.Box):
         """
         try:
             volume = int(volume)
-            GLib.idle_add(self.volume_scale.set_value, volume)
-            GLib.idle_add(self.update_volume_lines, volume)
+            idle_add_once(self.volume_scale.set_value, volume)
+            idle_add_once(self.update_volume_lines, volume)
         except (ValueError, TypeError):
             pass
 
@@ -840,12 +813,12 @@ class PlayerControls(Gtk.Box):
             if total > 0:
                 # Update progress bar
                 percent = (elapsed / total) * 100
-                GLib.idle_add(self.progress_bar.set_value, percent)
+                idle_add_once(self.progress_bar.set_value, percent)
 
                 # Update time labels
                 elapsed_str = self.format_time(elapsed)
                 total_str = self.format_time(total)
-                GLib.idle_add(self.elapsed_label.set_text, elapsed_str)
-                GLib.idle_add(self.total_label.set_text, total_str)
+                idle_add_once(self.elapsed_label.set_text, elapsed_str)
+                idle_add_once(self.total_label.set_text, total_str)
         except (ValueError, TypeError):
             pass

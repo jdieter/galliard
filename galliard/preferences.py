@@ -8,6 +8,7 @@ from galliard.widgets.async_ui_helper import AsyncUIHelper
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, GLib, Adw  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class PreferencesWindow(Adw.PreferencesWindow):
@@ -319,9 +320,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
             self.client_dropdown_handler_id = self.client_row.connect(
                 "notify::selected", self.on_snapcast_client_changed
             )
-            return
 
-        GLib.idle_add(update_client_dropdown)
+        idle_add_once(update_client_dropdown)
 
     def on_refresh_snapcast_clients(self, button):
         """Handle refresh button click for Snapcast clients"""

@@ -1,13 +1,14 @@
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gdk, Gio, GLib  # noqa: E402
+from gi.repository import Gtk, Gdk, Gio  # noqa: E402
 
 from galliard.models import Artist, Album, Song  # noqa: E402
 from galliard.utils.sorting import get_sort_key  # noqa: E402
 from galliard.utils.album_art import get_album_art_as_pixbuf  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class ArtistsView(Gtk.ScrolledWindow):
@@ -338,7 +339,7 @@ class ArtistsView(Gtk.ScrolledWindow):
             child_store.append(album)
 
         # Force UI update
-        GLib.idle_add(lambda: self.artists_tree.queue_draw())
+        idle_add_once(lambda: self.artists_tree.queue_draw())
 
     async def _load_album_art_and_year(self, artist_name, album_name):
         """Load album art and year for an album"""
@@ -392,7 +393,7 @@ class ArtistsView(Gtk.ScrolledWindow):
                 album_text = f"{album.title} ({year})"
                 album.list_item.label.set_text(album_text)
 
-            GLib.idle_add(self.artists_tree.queue_draw)
+            idle_add_once(self.artists_tree.queue_draw)
 
     def _create_album_children_model(self, album_item):
         """Create model for album's songs"""
@@ -698,7 +699,7 @@ class ArtistsView(Gtk.ScrolledWindow):
                         self.artists_store.append(artist)
 
             # Force UI update
-            GLib.idle_add(lambda: self.artists_tree.queue_draw())
+            idle_add_once(lambda: self.artists_tree.queue_draw())
         except Exception as e:
             print(f"Error loading artists: {e}")
 

@@ -11,6 +11,7 @@ from gi.repository import GLib, GObject
 from gi.events import GLibEventLoopPolicy
 from galliard.models import Song, Album, Artist
 from galliard.cache import ImageCache
+from galliard.utils.glib import idle_add_once
 
 try:
     import mpd.asyncio
@@ -139,9 +140,9 @@ class MPDConn(GObject.Object):
 
                 # Emit error signal via GLib main context
                 if "Connection" in str(e):
-                    GLib.idle_add(self.emit, "connection-error", "Connection lost")
+                    idle_add_once(self.emit, "connection-error", "Connection lost")
                 else:
-                    GLib.idle_add(self.emit, "connection-error", str(e))
+                    idle_add_once(self.emit, "connection-error", str(e))
                 return None
             except Exception as e:
                 print(f"Unexpected error executing {cmd}: {e}")
@@ -225,7 +226,7 @@ class MPDConn(GObject.Object):
         result = await self._execute_command("connect", host, port, timeout, password)
         if result:
             self.connected = True
-            GLib.idle_add(self.emit, "connected")
+            idle_add_once(self.emit, "connected")
 
             # Reset previous status
             self.prev_status = {}
@@ -248,7 +249,7 @@ class MPDConn(GObject.Object):
 
     async def _reconnection_loop(self):
         """Asynchronous loop that attempts to reconnect to MPD server"""
-        GLib.idle_add(self.emit, "connecting")
+        idle_add_once(self.emit, "connecting")
 
         while not self.stop_reconnecting.is_set():
             if not self.connected:
@@ -284,7 +285,7 @@ class MPDConn(GObject.Object):
         if self.reconnect_task and not self.reconnect_task.done():
             return  # Reconnection task already running
 
-        GLib.idle_add(self.emit, "connecting-blocked")
+        idle_add_once(self.emit, "connecting-blocked")
 
         # Ensure we clean up any existing connection
         await self._disconnect_internal()
@@ -323,11 +324,11 @@ class MPDConn(GObject.Object):
         if not self.connected:
             return
 
-        GLib.idle_add(self.emit, "disconnecting-blocked")
+        idle_add_once(self.emit, "disconnecting-blocked")
 
         async def _disconnect_task():
             await self._disconnect_internal()
-            GLib.idle_add(self.emit, "disconnected")
+            idle_add_once(self.emit, "disconnected")
 
         asyncio.create_task(_disconnect_task())
 
@@ -344,7 +345,7 @@ class MPDConn(GObject.Object):
         ):
             try:
                 volume = int(status["volume"])
-                GLib.idle_add(self.emit, "volume-changed", volume)
+                idle_add_once(self.emit, "volume-changed", volume)
             except (ValueError, TypeError):
                 pass
 
@@ -353,7 +354,7 @@ class MPDConn(GObject.Object):
             "state" not in self.prev_status
             or status["state"] != self.prev_status["state"]
         ):
-            GLib.idle_add(self.emit, "playback-status-changed", status["state"])
+            idle_add_once(self.emit, "playback-status-changed", status["state"])
 
         # Check elapsed time changes
         if "elapsed" in status and (
@@ -363,7 +364,7 @@ class MPDConn(GObject.Object):
         ):
             try:
                 elapsed = float(status["elapsed"])
-                GLib.idle_add(self.emit, "elapsed-changed", elapsed)
+                idle_add_once(self.emit, "elapsed-changed", elapsed)
             except (ValueError, TypeError):
                 pass
 
@@ -383,7 +384,7 @@ class MPDConn(GObject.Object):
         ):
             repeat = status["repeat"] == "1"
             single = status["single"] == "1"
-            GLib.idle_add(self.emit, "repeat-changed", repeat, single)
+            idle_add_once(self.emit, "repeat-changed", repeat, single)
 
         # Check random mode changes
         if "random" in status and (
@@ -391,7 +392,7 @@ class MPDConn(GObject.Object):
             or status["random"] != self.prev_status["random"]
         ):
             random = status["random"] == "1"
-            GLib.idle_add(self.emit, "random-changed", random)
+            idle_add_once(self.emit, "random-changed", random)
 
         # Check consume mode changes
         if "consume" in status and (
@@ -399,7 +400,7 @@ class MPDConn(GObject.Object):
             or status["consume"] != self.prev_status["consume"]
         ):
             consume = status["consume"] == "1"
-            GLib.idle_add(self.emit, "consume-changed", consume)
+            idle_add_once(self.emit, "consume-changed", consume)
 
         # Check audio format changes
         if "audio" in status and (
@@ -413,7 +414,7 @@ class MPDConn(GObject.Object):
                     sample_rate = int(parts[0])
                     bits = int(parts[1])
                     # channels = int(parts[2]) if len(parts) > 2 else 2
-                    GLib.idle_add(
+                    idle_add_once(
                         self.emit, "audio-changed", status["audio"], sample_rate, bits
                     )
             except (ValueError, TypeError, IndexError):
@@ -426,7 +427,7 @@ class MPDConn(GObject.Object):
         ):
             try:
                 bitrate = int(status["bitrate"])
-                GLib.idle_add(self.emit, "bitrate-changed", bitrate)
+                idle_add_once(self.emit, "bitrate-changed", bitrate)
             except (ValueError, TypeError):
                 pass
 
@@ -698,7 +699,7 @@ class MPDConn(GObject.Object):
                     uri
                 )
             # Emit playlist-changed signal
-            GLib.idle_add(self.emit, "playlist-changed")
+            idle_add_once(self.emit, "playlist-changed")
             return True
         except Exception as e:
             print(f"Error adding songs to playlist: {e}")
@@ -793,7 +794,7 @@ class MPDConn(GObject.Object):
             await self.snapcast_client.set_volume(volume)
             self.snapcast_volume = volume
             # Emit volume change signal
-            GLib.idle_add(self.emit, "volume-changed", volume)
+            idle_add_once(self.emit, "volume-changed", volume)
             return True
         except Exception as e:
             print(f"Error setting Snapcast volume: {e}")
@@ -915,7 +916,7 @@ class MPDConn(GObject.Object):
                         and snapcast_volume != self.snapcast_volume
                     ):
                         self.snapcast_volume = snapcast_volume
-                        GLib.idle_add(self.emit, "volume-changed", snapcast_volume)
+                        idle_add_once(self.emit, "volume-changed", snapcast_volume)
                     last_volume_check = current_time
 
                     # Update the volume in status for compatibility
@@ -939,16 +940,16 @@ class MPDConn(GObject.Object):
                     else:
                         self.current_song = None
 
-                    GLib.idle_add(self.emit, "song-changed")
+                    idle_add_once(self.emit, "song-changed")
 
                 # Check if playlist changed
                 playlist_version = status.get("playlist")
                 if playlist_version != last_playlist_version:
                     last_playlist_version = playlist_version
-                    GLib.idle_add(self.emit, "playlist-changed")
+                    idle_add_once(self.emit, "playlist-changed")
 
                 # Always emit state changed for updating UI
-                GLib.idle_add(self.emit, "state-changed")
+                idle_add_once(self.emit, "state-changed")
 
                 # Sleep for a short time before polling again
                 try:
@@ -960,5 +961,5 @@ class MPDConn(GObject.Object):
                 print(f"Monitor error: {e}")
                 if not self.stop_monitoring.is_set():
                     asyncio.create_task(self._schedule_reconnection())
-                    GLib.idle_add(self.emit, "connection-error", "Connection lost")
+                    idle_add_once(self.emit, "connection-error", "Connection lost")
                 break

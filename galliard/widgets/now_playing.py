@@ -3,10 +3,11 @@
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, GLib, Pango  # noqa: E402
+from gi.repository import Gtk, Pango  # noqa: E402
 
 from galliard.utils.album_art import load_album_art  # noqa: E402
 from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
+from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class NowPlayingView(Gtk.Box):
@@ -193,17 +194,17 @@ class NowPlayingView(Gtk.Box):
     def on_mpd_connected(self, client):
         """Handle MPD connection"""
         if self.mpd_client.current_song:
-            GLib.idle_add(self.update_song_info)
+            idle_add_once(self.update_song_info)
         else:
             self.artist_label.set_text("Connected to MPD")
 
     def on_mpd_disconnected(self, client):
         """Handle MPD disconnection"""
-        GLib.idle_add(self.set_no_music_state)
+        idle_add_once(self.set_no_music_state)
 
     def on_song_changed(self, client):
         """Handle song change"""
-        GLib.idle_add(self.update_song_info)
+        idle_add_once(self.update_song_info)
 
     def on_state_changed(self, client):
         """Handle playback state change"""
