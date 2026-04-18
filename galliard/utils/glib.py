@@ -1,6 +1,5 @@
 """GLib utility functions for Galliard."""
 
-import logging
 from gi.repository import GLib
 
 def idle_add_once(callback, *args, **kwargs):

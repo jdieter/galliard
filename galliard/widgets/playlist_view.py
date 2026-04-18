@@ -257,15 +257,17 @@ class PlaylistView(Gtk.Box):
         row.set_title(GLib.markup_escape_text(title))
         row.set_subtitle(GLib.markup_escape_text(f"{artist} - {album}"))
 
-        # Load album art lazily
+        # Load album art lazily only if not already loaded
         album_art_widget = getattr(row, "album_art")
-        # Try to load album art asynchronously
-        AsyncUIHelper.run_async_operation(
-            self._load_song_art,
-            lambda result, widget=album_art_widget: self._update_item_art(widget, result),
-            song,
-            task_priority=110,  # Lower priority for album art loading
-        )
+        # Check if we already have album art for this song
+        if not hasattr(album_art_widget, "loaded_song_file") or getattr(album_art_widget, "loaded_song_file") != song.file:
+            # Try to load album art asynchronously
+            AsyncUIHelper.run_async_operation(
+                self._load_song_art,
+                lambda result, widget=album_art_widget, file=song.file: self._update_item_art(widget, result, file),
+                song,
+                task_priority=110,  # Lower priority for album art loading
+            )
 
         # Check if this is the current song
         if (
@@ -277,7 +279,7 @@ class PlaylistView(Gtk.Box):
         else:
             getattr(row, "playing_icon").set_opacity(0)
 
-    def _update_item_art(self, album_art_widget: Gtk.Image, pixbuf):
+    def _update_item_art(self, album_art_widget: Gtk.Image, pixbuf, song_file: str):
         """Update album art widget with new pixbuf"""
         if pixbuf:
             album_art_widget.set_from_pixbuf(pixbuf)
@@ -285,6 +287,8 @@ class PlaylistView(Gtk.Box):
         else:
             album_art_widget.set_from_icon_name("audio-x-generic-symbolic")
             setattr(album_art_widget, "pixbuf_data", None)
+        # Mark this widget as having loaded art for this song
+        setattr(album_art_widget, "loaded_song_file", song_file)
 
     async def _load_song_art(self, song: Song):
         """Load album art for a specific song"""
@@ -309,10 +313,31 @@ class PlaylistView(Gtk.Box):
         )
 
     def on_song_changed(self, client):
-        """Handle song change - refresh the view to update playing indicator"""
-        AsyncUIHelper.run_async_operation(
-            self.refresh_playlist, None  # No callback needed
-        )
+        """Handle song change - update the playing indicator only"""
+        self._update_playing_indicator()
+
+    def _update_playing_indicator(self):
+        """Update playing indicator for all rows without full refresh"""
+        if not self.mpd_client.is_connected():
+            return
+
+        current_song_id = None
+        if self.mpd_client.current_song:
+            current_song_id = self.mpd_client.current_song.get("id")
+
+        # Update all rows
+        row = self.playlist_view.get_first_child()
+        while row:
+            if hasattr(row, "song") and hasattr(row, "playing_icon"):
+                song = getattr(row, "song")
+                playing_icon = getattr(row, "playing_icon")
+                if current_song_id and song.id == current_song_id:
+                    if playing_icon.get_opacity() == 0:
+                        playing_icon.set_opacity(1)
+                else:
+                    if playing_icon.get_opacity() == 1:
+                        playing_icon.set_opacity(0)
+            row = row.get_next_sibling()
 
     @AsyncUIHelper.run_in_background
     async def refresh_playlist(self):
@@ -642,6 +667,11 @@ class PlaylistView(Gtk.Box):
         start_value = adj.get_value()
         target_value = rect.y
 
+        # Cancel any ongoing scroll animation
+        if hasattr(self, "_scroll_animation_id") and self._scroll_animation_id:
+            GLib.source_remove(self._scroll_animation_id)
+            self._scroll_animation_id = None
+
         # Define animation parameters
         duration = 500  # Animation duration in milliseconds
         fps = 60  # Frames per second
@@ -655,6 +685,7 @@ class PlaylistView(Gtk.Box):
     ):
         """Perform smooth scrolling animation with exponential easing"""
         if current_frame > total_frames:
+            self._scroll_animation_id = None
             return False
 
         # Calculate progress (0.0 to 1.0)
@@ -678,7 +709,7 @@ class PlaylistView(Gtk.Box):
 
         # Schedule the next frame
         if current_frame < total_frames:
-            GLib.timeout_add(
+            self._scroll_animation_id = GLib.timeout_add(
                 int(1000 / 60),
                 self._animate_scroll,
                 adj,
@@ -687,5 +718,7 @@ class PlaylistView(Gtk.Box):
                 total_frames,
                 current_frame + 1,
             )
+        else:
+            self._scroll_animation_id = None
 
         return False  # Remove from idle sources

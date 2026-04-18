@@ -1,18 +1,20 @@
 import gi
+import logging
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gio, GLib, Adw  # noqa: E402
+from gi.repository import Gtk, Gio, Adw  # noqa: E402
 from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class HeaderBar(Gtk.Box):
     """Header bar widget for Galliard"""
 
-    def __init__(self, mpd_conn):
+    def __init__(self, mpd_conn, window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
 
         self.mpd_conn = mpd_conn
+        self.window = window
 
         # Create the header bar using Adw
         self.header = Adw.HeaderBar()
@@ -66,6 +68,13 @@ class HeaderBar(Gtk.Box):
         self.search_entry = Gtk.SearchEntry()
         self.search_entry.set_hexpand(True)
         self.search_entry.connect("search-changed", self.on_search_changed)
+
+        # Connect focus events to disable/enable space accelerator
+        focus_controller = Gtk.EventControllerFocus.new()
+        focus_controller.connect("enter", self.on_search_focus_in)
+        focus_controller.connect("leave", self.on_search_focus_out)
+        self.search_entry.add_controller(focus_controller)
+
         search_box.append(self.search_entry)
 
         self.search_bar.set_child(search_box)
@@ -215,10 +224,16 @@ class HeaderBar(Gtk.Box):
         if hasattr(self, "search_changed_callback"):
             self.search_changed_callback(query, search_type)
 
+    def on_search_focus_in(self, controller):
+        """Handle search entry gaining focus"""
+        logging.debug("Search entry focused in")
+        self.window.remove_space_accel()
+
+    def on_search_focus_out(self, controller):
+        """Handle search entry losing focus"""
+        logging.debug("Search entry focused out")
+        self.window.restore_space_accel()
+
     def set_search_changed_callback(self, callback):
         """Set callback for search changes"""
         self.search_changed_callback = callback
-
-    def setup_search_entry(self, window):
-        """Set up search entry after window is created"""
-        self.search_bar.set_key_capture_widget(window)

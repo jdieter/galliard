@@ -300,20 +300,14 @@ class PlayerControls(Gtk.Box):
     def update_play_button_state(self):
         """Update play button icon based on current state"""
         if not self.mpd_client.is_connected():
-            idle_add_once(
-                self.play_button.set_icon_name, "media-playback-start-symbolic"
-            )
+            self.play_button.set_icon_name("media-playback-start-symbolic")
             return
 
         state = self.mpd_client.status.get("state", "stop")
         if state == "play":
-            idle_add_once(
-                self.play_button.set_icon_name, "media-playback-pause-symbolic"
-            )
+            self.play_button.set_icon_name("media-playback-pause-symbolic")
         else:
-            idle_add_once(
-                self.play_button.set_icon_name, "media-playback-start-symbolic"
-            )
+            self.play_button.set_icon_name("media-playback-start-symbolic")
 
     def on_play_clicked(self, button):
         """Handle play/pause button click"""
@@ -543,32 +537,26 @@ class PlayerControls(Gtk.Box):
     def on_state_changed(self, client):
         """Handle playback state change"""
         if not self.mpd_client.is_connected():
-            idle_add_once(
-                self.play_button.set_icon_name, "media-playback-start-symbolic"
-            )
+            self.play_button.set_icon_name("media-playback-start-symbolic")
             return
 
         status = self.mpd_client.status
         state = status.get("state", "stop")
 
         if state == "play":
-            idle_add_once(
-                self.play_button.set_icon_name, "media-playback-pause-symbolic"
-            )
+            self.play_button.set_icon_name("media-playback-pause-symbolic")
         else:
-            idle_add_once(
-                self.play_button.set_icon_name, "media-playback-start-symbolic"
-            )
+            self.play_button.set_icon_name("media-playback-start-symbolic")
 
         if state == "stop":
             # Reset elapsed time and progress bar when stopped
-            idle_add_once(self.elapsed_label.set_text, "0:00")
-            idle_add_once(self.progress_bar.set_value, 0)
+            self.elapsed_label.set_text("0:00")
+            self.progress_bar.set_value(0)
 
         # Update volume
         try:
             volume = int(status.get("volume", 50))
-            idle_add_once(self.volume_scale.set_value, volume)
+            self.volume_scale.set_value(volume)
         except (ValueError, TypeError):
             pass
 
@@ -585,17 +573,17 @@ class PlayerControls(Gtk.Box):
             if date is not None:
                 album += f" ({date})"
             # Update the detailed song information
-            idle_add_once(self.song_title_label.set_text, title)
-            idle_add_once(self.artist_prefix.set_text, "By")
-            idle_add_once(self.song_artist_label.set_text, artist)
-            idle_add_once(self.album_prefix.set_text, "from")
-            idle_add_once(self.song_album_label.set_text, album)
+            self.song_title_label.set_text(title)
+            self.artist_prefix.set_text("By")
+            self.song_artist_label.set_text(artist)
+            self.album_prefix.set_text("from")
+            self.song_album_label.set_text(album)
         else:
-            idle_add_once(self.song_title_label.set_text, "Not playing")
-            idle_add_once(self.artist_prefix.set_text, "")
-            idle_add_once(self.song_artist_label.set_text, "")
-            idle_add_once(self.album_prefix.set_text, "")
-            idle_add_once(self.song_album_label.set_text, "")
+            self.song_title_label.set_text("Not playing")
+            self.artist_prefix.set_text("")
+            self.song_artist_label.set_text("")
+            self.album_prefix.set_text("")
+            self.song_album_label.set_text("")
 
         # Use AsyncUIHelper to load album art asynchronously
         AsyncUIHelper.run_async_operation(
@@ -616,20 +604,14 @@ class PlayerControls(Gtk.Box):
             return
 
         if repeat and single:
-            idle_add_once(
-                self.repeat_button.set_icon_name, "media-playlist-repeat-song-symbolic"
-            )
-            idle_add_once(self.repeat_button.add_css_class, "enabled-mode")
+            self.repeat_button.set_icon_name("media-playlist-repeat-song-symbolic")
+            self.repeat_button.add_css_class("enabled-mode")
         elif repeat:
-            idle_add_once(
-                self.repeat_button.set_icon_name, "media-playlist-repeat-symbolic"
-            )
-            idle_add_once(self.repeat_button.add_css_class, "enabled-mode")
+            self.repeat_button.set_icon_name("media-playlist-repeat-symbolic")
+            self.repeat_button.add_css_class("enabled-mode")
         else:
-            idle_add_once(
-                self.repeat_button.set_icon_name, "media-playlist-repeat-symbolic"
-            )
-            idle_add_once(self.repeat_button.remove_css_class, "enabled-mode")
+            self.repeat_button.set_icon_name("media-playlist-repeat-symbolic")
+            self.repeat_button.remove_css_class("enabled-mode")
 
     def on_random_changed(self, client, random):
         """
@@ -643,15 +625,11 @@ class PlayerControls(Gtk.Box):
             return
 
         if random:
-            idle_add_once(
-                self.random_button.set_icon_name, "media-playlist-shuffle-symbolic"
-            )
-            idle_add_once(self.random_button.add_css_class, "enabled-mode")
+            self.random_button.set_icon_name("media-playlist-shuffle-symbolic")
+            self.random_button.add_css_class("enabled-mode")
         else:
-            idle_add_once(
-                self.random_button.set_icon_name, "media-playlist-consecutive-symbolic"
-            )
-            idle_add_once(self.random_button.remove_css_class, "enabled-mode")
+            self.random_button.set_icon_name("media-playlist-consecutive-symbolic")
+            self.random_button.remove_css_class("enabled-mode")
 
     def reset_controls(self, client=None):
         """Reset all controls to their initial state"""
@@ -733,13 +711,13 @@ class PlayerControls(Gtk.Box):
             if total > 0:
                 # Update progress bar
                 percent = (elapsed / total) * 100
-                idle_add_once(self.progress_bar.set_value, percent)
+                self.progress_bar.set_value(percent)
 
                 # Update time labels
                 elapsed_str = self.format_time(elapsed)
                 total_str = self.format_time(total)
-                idle_add_once(self.elapsed_label.set_text, elapsed_str)
-                idle_add_once(self.total_label.set_text, total_str)
+                self.elapsed_label.set_text(elapsed_str)
+                self.total_label.set_text(total_str)
 
         except (ValueError, TypeError, KeyError) as e:
             # Handle any errors gracefully
@@ -813,12 +791,12 @@ class PlayerControls(Gtk.Box):
             if total > 0:
                 # Update progress bar
                 percent = (elapsed / total) * 100
-                idle_add_once(self.progress_bar.set_value, percent)
+                self.progress_bar.set_value(percent)
 
                 # Update time labels
                 elapsed_str = self.format_time(elapsed)
                 total_str = self.format_time(total)
-                idle_add_once(self.elapsed_label.set_text, elapsed_str)
-                idle_add_once(self.total_label.set_text, total_str)
+                self.elapsed_label.set_text(elapsed_str)
+                self.total_label.set_text(total_str)
         except (ValueError, TypeError):
             pass

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import gi
+import logging
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -46,7 +47,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_content(self.toolbar_view)
 
         # Header and controls
-        self.header_bar = HeaderBar(self.mpd_conn)
+        self.header_bar = HeaderBar(self.mpd_conn, self)
         self.player_controls = PlayerControls(self.mpd_conn)
         self.toolbar_view.add_top_bar(self.header_bar)
         self.toolbar_view.add_top_bar(self.player_controls)
@@ -66,6 +67,9 @@ class MainWindow(Adw.ApplicationWindow):
         # Connect search callback
         def on_search_changed(query, search_type):
             if query.strip():
+                if len(query.strip()) < 3:
+                    return  # Ignore short queries
+
                 # Show search results page
                 visible_page = self.content_navigation.get_visible_page()
                 if visible_page and visible_page.get_tag() != "search":
@@ -223,6 +227,20 @@ class MainWindow(Adw.ApplicationWindow):
                 app.set_accels_for_action(f"win.{name}", accels)
 
         self.insert_action_group("win", action_group)
+
+    def remove_space_accel(self):
+        """Remove space key accelerator for play-pause"""
+        logging.debug("Removing space key accelerator for play-pause")
+        app = self.get_application()
+        if app:
+            app.set_accels_for_action("win.play-pause", [])
+
+    def restore_space_accel(self):
+        """Restore space key accelerator for play-pause"""
+        logging.debug("Restoring space key accelerator for play-pause")
+        app = self.get_application()
+        if app:
+            app.set_accels_for_action("win.play-pause", ["space"])
 
     def on_play_pause(self, action, param):
         """Toggle play/pause"""

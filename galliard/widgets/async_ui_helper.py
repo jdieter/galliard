@@ -8,11 +8,13 @@ import logging
 from galliard.utils.glib import idle_add_once
 
 task_queue = asyncio.PriorityQueue()
+cancelled_task_ids = {}
 process_queue_running = False
 
-
 async def process_queue():
-    global task_queue, process_queue_running
+    global task_queue
+    global process_queue_running
+    global cancelled_task_ids
 
     process_queue_running = True
     while True:
@@ -20,7 +22,15 @@ async def process_queue():
         if item is None:
             break
 
-        _, _, async_func, callback, args, kwargs = item
+        _, timestamp, task_id, async_func, callback, args, kwargs = item
+        if task_id in cancelled_task_ids.keys():
+            await asyncio.sleep(0)  # Yield control to the event loop
+            continue
+        # Clean up old cancelled task IDs, the list shouldn't grow larger than
+        # a few items, so this shouldn't be too expensive
+        for cid, cancel_time in list(cancelled_task_ids.items()):
+            if timestamp >= cancel_time:
+                del cancelled_task_ids[cid]
         try:
             result = await async_func(*args, **kwargs)
             if callback:
@@ -88,6 +98,20 @@ class AsyncUIHelper:
         idle_add_once(idle_callback)
 
     @staticmethod
+    def cancel_async_operation(task_id):
+        """
+        Cancel a queued async operation by its task ID
+
+        This ensures that any queued operations with the given task ID will be
+        skipped when processed.
+
+        Args:
+            task_id: ID of the task to cancel
+        """
+        global cancelled_task_ids
+        cancelled_task_ids[task_id] = datetime.datetime.now().timestamp()
+
+    @staticmethod
     def run_async_operation(async_func, callback=None, *args, **kwargs):
         """
         Queue an artwork request to be processed asynchronously
@@ -97,16 +121,19 @@ class AsyncUIHelper:
             callback: Function to call with the result
             *args, **kwargs: Arguments to pass to async_func
         """
+        global task_queue
         global process_queue_running
 
         # check for priority in kwargs and set default if not provided
         priority = kwargs.pop("task_priority", 99)
+        task_id = kwargs.pop("task_id", None)
 
         # Add the item to the queue
         task_queue.put_nowait(
             (
                 priority,
                 datetime.datetime.now().timestamp(),
+                task_id,
                 async_func,
                 callback,
                 args,
