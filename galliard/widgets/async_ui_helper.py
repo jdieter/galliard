@@ -23,13 +23,16 @@ async def process_queue():
             break
 
         _, timestamp, task_id, async_func, callback, args, kwargs = item
-        if task_id in cancelled_task_ids.keys():
+        if task_id in cancelled_task_ids:
             await asyncio.sleep(0)  # Yield control to the event loop
             continue
-        # Clean up old cancelled task IDs, the list shouldn't grow larger than
-        # a few items, so this shouldn't be too expensive
+        # Expire cancellations older than the TTL. We can't key the cleanup off
+        # the current item's timestamp because task_queue is a PriorityQueue:
+        # a higher-priority task enqueued after a cancellation can be dequeued
+        # before the task it cancels, so the cancellation must outlive it.
+        now = datetime.datetime.now().timestamp()
         for cid, cancel_time in list(cancelled_task_ids.items()):
-            if timestamp >= cancel_time:
+            if now - cancel_time > 60:
                 del cancelled_task_ids[cid]
         try:
             result = await async_func(*args, **kwargs)

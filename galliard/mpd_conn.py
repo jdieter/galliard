@@ -439,14 +439,14 @@ class MPDConn(GObject.Object):
         if not self.connected:
             return []
         result = await self._execute_command("list", "album") or []
-        return [Album(**item) for item in result]
+        return [Album(title=item["album"]) for item in result if item.get("album")]
 
     async def async_get_artists(self) -> list[Artist]:
         """Get all artists asynchronously"""
         if not self.connected:
             return []
         artists_data = await self._execute_command("list", "artist") or []
-        return [Artist(**item) for item in artists_data]
+        return [Artist(name=item["artist"]) for item in artists_data if item.get("artist")]
 
     async def async_get_songs_by_artist(self, artist: str) -> list[Song]:
         """Get songs by artist asynchronously"""
@@ -467,7 +467,11 @@ class MPDConn(GObject.Object):
         if not self.connected:
             return []
         result = await self._execute_command("list", "album", "artist", artist) or []
-        return [Album(**item) for item in result]
+        return [
+            Album(title=item["album"], artist=artist)
+            for item in result
+            if item.get("album")
+        ]
 
     async def async_search(self, type: str, query: str) -> list[Song]:
         """Search for songs asynchronously"""

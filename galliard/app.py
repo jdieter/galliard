@@ -89,6 +89,7 @@ class Galliard(Adw.Application):
 
         if (
             SystemTrayIcon
+            and APPINDICATOR_AVAILABLE
             and not self.system_tray_icon
             and self.config.get("ui.minimize_to_tray", True)
         ):

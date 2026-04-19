@@ -329,8 +329,8 @@ class SearchResultsView(Gtk.ScrolledWindow):
 
     def _format_track_title(self, song):
         """Format song title with track number if available"""
-        track = getattr(song, 'track', None)
-        title = getattr(song, 'title', 'Unknown')
+        track = self._get_field_value(song, 'track')
+        title = self._get_field_value(song, 'title') or 'Unknown'
 
         if track:
             # Handle track numbers like "1/12" or "1"
@@ -376,8 +376,8 @@ class SearchResultsView(Gtk.ScrolledWindow):
     def _create_title_file_item(self, song):
         """Create a FileItem for a title match with album art"""
         title = self._format_track_title(song)
-        album = getattr(song, 'album', 'Unknown')
-        artist = getattr(song, 'artist', 'Unknown')
+        album = self._get_field_value(song, 'album') or 'Unknown'
+        artist = self._get_field_value(song, 'artist') or 'Unknown'
 
         title_item = FileItem(
             name=f"{title} - {album} - {artist}",

@@ -88,13 +88,13 @@ class AlbumsView(Gtk.ScrolledWindow):
         """Bind album data to widget"""
         album = list_item.get_item()
         if album:
-            list_item.title_label.set_text(album.name)
+            list_item.title_label.set_text(album.title)
 
             # Load album art asynchronously
             AsyncUIHelper.run_async_operation(
                 self._load_album_art,
                 lambda result, item=list_item: self._update_album_art(item, result),
-                album.name,
+                album.title,
             )
 
             # If album has artist property, show it
@@ -110,9 +110,8 @@ class AlbumsView(Gtk.ScrolledWindow):
             # Find first song in this album
             songs = await self.mpd_client.async_get_songs_by_album(album_name)
             if songs:
-                first_song = songs[0]
                 return await get_album_art_as_pixbuf(
-                    self.mpd_client, first_song["file"], 48
+                    self.mpd_client, songs[0].file, 48
                 )
         except Exception as e:
             print(f"Error loading album art: {e}")
@@ -128,7 +127,7 @@ class AlbumsView(Gtk.ScrolledWindow):
         album = list_item.get_item()
         if album and self.mpd_client.is_connected():
             # Play all songs in this album
-            AsyncUIHelper.run_async_operation(self._play_album_songs, None, album.name)
+            AsyncUIHelper.run_async_operation(self._play_album_songs, None, album.title)
 
     async def _play_album_songs(self, album_name):
         """Play all songs in an album"""
@@ -138,15 +137,25 @@ class AlbumsView(Gtk.ScrolledWindow):
 
             # Find and add all songs in the album
             songs = await self.mpd_client.async_get_songs_by_album(album_name)
-            if songs:
-                # Sort by track number if available
-                songs.sort(key=lambda song: int(song.get("track", "0").split("/")[0]))
+            if not songs:
+                return
 
-                for song in songs:
-                    self.mpd_client.add_to_playlist(song["file"])
+            # Sort by track number if available
+            def track_sort_key(song):
+                track = song.track
+                if isinstance(track, list):
+                    track = track[0] if track else None
+                if not track:
+                    return 0
+                first = str(track).split("/")[0]
+                return int(first) if first.isdigit() else 0
 
-                # Start playback
-                self.mpd_client.client.play(0)
+            songs.sort(key=track_sort_key)
+
+            await self.mpd_client.async_add_songs_to_playlist(
+                [song.file for song in songs]
+            )
+            await self.mpd_client.async_play(0)
         except Exception as e:
             print(f"Error playing album songs: {e}")
 
@@ -155,16 +164,15 @@ class AlbumsView(Gtk.ScrolledWindow):
         if not self.mpd_client.is_connected():
             return
 
-        albums = [item["album"] for item in await self.mpd_client.async_get_albums()]
+        albums = await self.mpd_client.async_get_albums()
         if albums:
             # Sort albums alphabetically using custom sorting
-            albums.sort(key=lambda album: get_sort_key(album))
+            albums.sort(key=lambda album: get_sort_key(album.title))
 
             # Update list store
             self.albums_store.remove_all()
             for album in albums:
-                if album:  # Skip empty album names
-                    self.albums_store.append(Album(album))
+                self.albums_store.append(album)
 
     def refresh(self):
         """Refresh the albums view"""

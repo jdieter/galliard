@@ -24,6 +24,8 @@ class PlaylistView(Gtk.Box):
         # Track keyboard modifiers
         self.current_modifiers = 0
 
+        self._scroll_animation_id = None
+
         # Create UI
         self.create_ui()
 
@@ -32,6 +34,16 @@ class PlaylistView(Gtk.Box):
         self.mpd_client.connect_signal("disconnected", self.on_mpd_disconnected)
         self.mpd_client.connect_signal("playlist-changed", self.on_playlist_changed)
         self.mpd_client.connect_signal("song-changed", self.on_song_changed)
+
+        # Stop the scroll animation when the widget is torn down so the
+        # callback can't fire against destroyed widgets.
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Cancel any in-flight scroll animation when the widget is unrealized"""
+        if self._scroll_animation_id:
+            GLib.source_remove(self._scroll_animation_id)
+            self._scroll_animation_id = None
 
     def _update_modifier_state(self, keyval, state, is_press):
         """Update modifier state for both press and release events"""

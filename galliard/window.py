@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import asyncio
 import gi
 import logging
 
@@ -247,24 +248,24 @@ class MainWindow(Adw.ApplicationWindow):
         if self.mpd_conn.is_connected():
             status = self.mpd_conn.status
             if status.get("state") == "play":
-                self.mpd_conn.pause()
+                asyncio.create_task(self.mpd_conn.async_pause())
             else:
-                self.mpd_conn.play()
+                asyncio.create_task(self.mpd_conn.async_play())
 
     def on_next(self, action, param):
         """Play next track"""
         if self.mpd_conn.is_connected():
-            self.mpd_conn.next()
+            asyncio.create_task(self.mpd_conn.async_next())
 
     def on_previous(self, action, param):
         """Play previous track"""
         if self.mpd_conn.is_connected():
-            self.mpd_conn.previous()
+            asyncio.create_task(self.mpd_conn.async_previous())
 
     def on_stop(self, action, param):
         """Stop playback"""
         if self.mpd_conn.is_connected():
-            self.mpd_conn.stop()
+            asyncio.create_task(self.mpd_conn.async_stop())
 
     def on_close_request(self, window):
         """Handle window close request"""

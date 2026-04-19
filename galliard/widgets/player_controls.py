@@ -19,9 +19,14 @@ class PlayerControls(Gtk.Box):
 
         self.mpd_client = mpd_client
         self._volume_timeout_id = None
+        self._progress_timer_id = None
 
         # Create UI
         self.create_ui()
+
+        # Stop the progress timer when the widget is torn down so the
+        # callback can't fire against destroyed widgets.
+        self.connect("unrealize", self._on_unrealize)
 
         # Connect signals
         self.mpd_client.connect_signal("disconnecting-blocked", self.reset_controls)
@@ -149,7 +154,7 @@ class PlayerControls(Gtk.Box):
         progress_box.append(time_box)
 
         # Update timer
-        GLib.timeout_add(1000, self.update_progress)
+        self._progress_timer_id = GLib.timeout_add(1000, self.update_progress)
 
     def create_control_buttons(self):
         """Create playback control buttons"""
@@ -694,6 +699,12 @@ class PlayerControls(Gtk.Box):
         self.next_button.set_sensitive(sensitive)
         self.repeat_button.set_sensitive(sensitive)
         self.random_button.set_sensitive(sensitive)
+
+    def _on_unrealize(self, widget):
+        """Cancel the progress timer when the widget is unrealized"""
+        if self._progress_timer_id is not None:
+            GLib.source_remove(self._progress_timer_id)
+            self._progress_timer_id = None
 
     def update_progress(self):
         """Update progress bar and time labels every second"""

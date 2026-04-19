@@ -106,7 +106,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             model=Gtk.StringList.new(["MPD", "Snapcast"])
         )
 
-        if self.app.mpd_client.supports_snapcast():
+        if self.app.mpd_conn.supports_snapcast():
             current_method = self.config.get("volume.method", "mpd").lower()
             if current_method == "snapcast":
                 volume_method_row.set_selected(1)
@@ -165,7 +165,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # Store references to Snapcast-specific rows for sensitivity control
         self.snapcast_rows = [snapcast_server_row, snapcast_port_row, self.client_row]
 
-        if self.app.mpd_client.supports_snapcast():
+        if self.app.mpd_conn.supports_snapcast():
             logging.debug("Snapcast support is available.")
             # Set sensitivity of Snapcast controls based on current method
             current_method = self.config.get("volume.method", "mpd").lower()
@@ -284,7 +284,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         port = self.config.get("snapcast.port", 1705)
 
         AsyncUIHelper.run_async_operation(
-            self.app.mpd_client.async_get_snapcast_clients,
+            self.app.mpd_conn.async_get_snapcast_clients,
             self._handle_snapcast_client_update,
             host,
             port,
@@ -301,7 +301,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
             # Update combo row with new client list
             client_names = [
-                client["name"] for client in self.app.mpd_client.snapcast_clients
+                client["name"] for client in self.app.mpd_conn.snapcast_clients
             ] or ["No clients found"]
 
             # Create a new string list model
@@ -312,7 +312,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
             # Set selected client if it exists
             selected_client_id = self.config.get("snapcast.client_id", "")
-            for i, client in enumerate(self.app.mpd_client.snapcast_clients):
+            for i, client in enumerate(self.app.mpd_conn.snapcast_clients):
                 if client["id"] == selected_client_id:
                     self.client_row.set_selected(i)
                     break
@@ -362,11 +362,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
         selected_item = combo_row.get_selected_item()
         if selected_item:
             selected = selected_item.get_string()
-            for client in self.app.mpd_client.snapcast_clients:
+            for client in self.app.mpd_conn.snapcast_clients:
                 if client["name"] == selected:
                     logging.debug(f"Setting Snapcast client ID to: {client['id']}")
                     self.config.set("snapcast.client_id", client["id"])
                     AsyncUIHelper.run_async_operation(
-                        self.app.mpd_client._select_snapcast_client
+                        self.app.mpd_conn._select_snapcast_client
                     )
                     return
