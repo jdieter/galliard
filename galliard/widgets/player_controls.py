@@ -66,8 +66,8 @@ class PlayerControls(Gtk.Box):
 
         # Add CSS for error message styling
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(
-            b"""
+        css_provider.load_from_string(
+            """
             .error-title {
                 color: #ed333b;
                 font-weight: bold;
@@ -201,8 +201,8 @@ class PlayerControls(Gtk.Box):
 
         # Add CSS for enabled mode buttons
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(
-            b"""
+        css_provider.load_from_string(
+            """
             button.enabled-mode {
                 color: @accent_color;
             }
@@ -260,8 +260,8 @@ class PlayerControls(Gtk.Box):
 
         # Add CSS for styling the volume lines
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(
-            b"""
+        css_provider.load_from_string(
+            """
             .volume-line {
                 background-color: @accent_bg_color;
                 border-radius: 3px;

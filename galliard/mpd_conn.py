@@ -107,7 +107,14 @@ class MPDConn(GObject.Object):
             try:
                 if cmd == "connect":
                     host, port, timeout, password = args
-                    await self.client.connect(host, port, timeout)
+                    # python-mpd2's async MPDClient.connect is
+                    # (host, port, loop=None) -- no timeout arg. Enforce
+                    # the user-configured timeout via wait_for so slow
+                    # / hung servers don't block indefinitely.
+                    await asyncio.wait_for(
+                        self.client.connect(host, port),
+                        timeout=timeout,
+                    )
                     if password:
                         await self.client.password(password)  # type: ignore
                     return True

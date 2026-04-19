@@ -16,8 +16,9 @@ def get_sort_key(text, ignore_prefixes=True):
     text = text.lower()
 
     # Decompose accented characters and drop the combining marks so
-    # diacritics don't split letters across sort buckets.
-    text = unicodedata.normalize("NFKC", text)
+    # diacritics don't split letters across sort buckets. NFKD splits
+    # "é" into "e" + combining accent; NFKC would keep them composed.
+    text = unicodedata.normalize("NFKD", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
     text = text.replace("ø", "o")
 

@@ -57,7 +57,7 @@ def apply_compact_tree_css(widget_name: str) -> None:
     """
 
     provider = Gtk.CssProvider()
-    provider.load_from_data(css.encode())
+    provider.load_from_string(css)
     Gtk.StyleContext.add_provider_for_display(
         display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )

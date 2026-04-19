@@ -51,7 +51,6 @@ class NowPlayingView(Gtk.Box):
         self.album_art = Gtk.Picture()
         self.album_art.set_size_request(200, 200)
         self.album_art.set_can_shrink(False)
-        self.album_art.set_keep_aspect_ratio(True)
         self.album_art.set_content_fit(Gtk.ContentFit.CONTAIN)
         art_box.append(self.album_art)
         top_box.append(art_box)

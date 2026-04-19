@@ -3,6 +3,8 @@ from collections import OrderedDict
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf, Gdk, Gtk  # noqa: E402
 
 from galliard.models import Song  # noqa: E402
@@ -23,7 +25,7 @@ def _ensure_rounded_css(radius=8):
     if display is None:
         return
     provider = Gtk.CssProvider()
-    provider.load_from_data(f".rounded {{ border-radius: {radius}px; }}".encode())
+    provider.load_from_string(f".rounded {{ border-radius: {radius}px; }}")
     Gtk.StyleContext.add_provider_for_display(
         display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
@@ -100,7 +102,7 @@ def apply_rounded_corners_to_picture(picture, radius=5):
         border-radius: {radius}px;
     }}
     """
-    css_provider.load_from_data(css.encode())
+    css_provider.load_from_string(css)
 
     if display := Gdk.Display.get_default():
         Gtk.StyleContext.add_provider_for_display(

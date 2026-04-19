@@ -125,7 +125,7 @@ class Galliard(Adw.Application):
     def on_preferences(self, action, param):
         """Open the preferences window."""
         prefs = PreferencesWindow(self, self.config)
-        prefs.present()
+        prefs.present(self.props.active_window)
 
     def on_about(self, action, param):
         """Open the about dialog."""

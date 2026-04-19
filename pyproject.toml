@@ -36,9 +36,31 @@ dev = [
     "black",
     "flake8",
 ]
+test = [
+    "pytest>=7",
+    "pytest-asyncio>=0.21",
+]
 
 [tool.setuptools]
 script-files = ["bin/galliard"]
 
 [tool.pyright]
 reportMissingModuleSource = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live_mpd: requires an mpd binary on PATH",
+    "gtk: requires Gtk4 + libadwaita + a display",
+]
+asyncio_mode = "auto"
+
+# pytest-asyncio 0.21 and PyGObject's gi.events both use Python 3.12-ish
+# asyncio APIs that 3.14 has deprecated. There's nothing we can do
+# in-tree to silence them without pinning newer versions everywhere, so
+# scope the ignore rules to those modules only (filterwarnings' last
+# field is a regex on the module path).
+filterwarnings = [
+    "ignore::DeprecationWarning:pytest_asyncio\\.",
+    "ignore::DeprecationWarning:gi\\.events",
+]

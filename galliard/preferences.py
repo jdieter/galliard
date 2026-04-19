@@ -10,7 +10,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, GLib, Adw  # noqa: E402
 
 
-class PreferencesWindow(Adw.PreferencesWindow):
+class PreferencesWindow(Adw.PreferencesDialog):
     """Adwaita preferences dialog for MPD / Snapcast / interface settings."""
 
     def __init__(self, app, config):
@@ -20,9 +20,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self.app = app
         self.config = config
 
-        self.set_default_size(500, 700)
-        self.set_modal(True)
-        self.set_transient_for(app.props.active_window)
+        self.set_content_width(500)
+        self.set_content_height(700)
 
         self.create_connection_page()
         self.create_interface_page()
