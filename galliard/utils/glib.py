@@ -3,19 +3,10 @@
 from gi.repository import GLib
 
 def idle_add_once(callback, *args, **kwargs):
-    """
-    Add a callback to be called during idle time, guaranteed to run only once.
+    """Schedule ``callback(*args, **kwargs)`` to run once on the GLib main loop.
 
-    This wraps GLib.idle_add with a helper function that always returns False,
-    ensuring the callback is removed after a single execution.
-
-    Args:
-        callback: The function to call during idle time
-        *args: Positional arguments to pass to the callback
-        **kwargs: Keyword arguments to pass to the callback
-
-    Returns:
-        The ID of the event source (same as GLib.idle_add)
+    A thin wrapper over ``GLib.idle_add`` that returns ``SOURCE_REMOVE`` so
+    the callback isn't kept on the idle queue.
     """
     def _wrapper():
         callback(*args, **kwargs)

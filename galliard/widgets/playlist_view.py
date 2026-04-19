@@ -7,14 +7,14 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Gdk, Adw, GLib  # noqa: E402
 
 from galliard.models import Song  # noqa: E402
-from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
+from galliard.utils.async_task_queue import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
-from galliard.utils.album_art import get_album_art_as_pixbuf  # noqa: E402
+from galliard.utils.album_art import bind_art_to_widget  # noqa: E402
 from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class PlaylistView(Gtk.Box):
-    """Playlist view widget for Galliard"""
+    """Current-playlist view: scrollable list of queued songs with transport actions."""
 
     def __init__(self, mpd_client):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -202,7 +202,7 @@ class PlaylistView(Gtk.Box):
         if (
             self.mpd_client.is_connected()
             and self.mpd_client.current_song
-            and self.mpd_client.current_song.get("id") == song.data.get("id")
+            and self.mpd_client.current_song.get("id") == song.id
         ):
             row.playing_icon.set_opacity(1)
         else:
@@ -269,17 +269,14 @@ class PlaylistView(Gtk.Box):
         row.set_title(GLib.markup_escape_text(title))
         row.set_subtitle(GLib.markup_escape_text(f"{artist} - {album}"))
 
-        # Load album art lazily only if not already loaded
-        album_art_widget = getattr(row, "album_art")
-        # Check if we already have album art for this song
-        if not hasattr(album_art_widget, "loaded_song_file") or getattr(album_art_widget, "loaded_song_file") != song.file:
-            # Try to load album art asynchronously
-            AsyncUIHelper.run_async_operation(
-                self._load_song_art,
-                lambda result, widget=album_art_widget, file=song.file: self._update_item_art(widget, result, file),
-                song,
-                task_priority=110,  # Lower priority for album art loading
-            )
+        # Load album art lazily; bind_art_to_widget dedupes per-widget.
+        bind_art_to_widget(
+            self.mpd_client,
+            getattr(row, "album_art"),
+            song,
+            200,
+            task_priority=110,
+        )
 
         # Check if this is the current song
         if (
@@ -290,23 +287,6 @@ class PlaylistView(Gtk.Box):
             getattr(row, "playing_icon").set_opacity(1)
         else:
             getattr(row, "playing_icon").set_opacity(0)
-
-    def _update_item_art(self, album_art_widget: Gtk.Image, pixbuf, song_file: str):
-        """Update album art widget with new pixbuf"""
-        if pixbuf:
-            album_art_widget.set_from_pixbuf(pixbuf)
-            setattr(album_art_widget, "pixbuf_data", pixbuf)
-        else:
-            album_art_widget.set_from_icon_name("audio-x-generic-symbolic")
-            setattr(album_art_widget, "pixbuf_data", None)
-        # Mark this widget as having loaded art for this song
-        setattr(album_art_widget, "loaded_song_file", song_file)
-
-    async def _load_song_art(self, song: Song):
-        """Load album art for a specific song"""
-        return await get_album_art_as_pixbuf(
-            self.mpd_client, song.file, 200
-        )
 
     def on_mpd_connected(self, client):
         """Handle MPD connection"""
@@ -432,7 +412,7 @@ class PlaylistView(Gtk.Box):
                 getattr(row, "playing_icon").set_opacity(1)
 
         # Update status bar
-        total_time = sum(float(getattr(song, "time", 0)) for song in new_playlist)
+        total_time = sum(float(song.get("time", 0)) for song in new_playlist)
         song_count = len(new_playlist)
         self.status_label.set_text(
             f"{song_count} {'song' if song_count == 1 else 'songs'}, "
@@ -502,21 +482,18 @@ class PlaylistView(Gtk.Box):
 
     @AsyncUIHelper.run_in_background
     async def remove_selected_items(self, positions):
-        """Remove multiple items from the playlist.
-
-        Args:
-            positions: List of playlist positions to remove
-        """
+        """Delete the playlist rows at ``positions`` (higher indexes first)."""
         if not self.mpd_client.is_connected():
             return
 
-        # Sort positions in descending order to avoid index shifting
+        # Delete higher positions first so earlier deletes don't shift
+        # indexes out from under the remaining requests.
         positions.sort(reverse=True)
 
         for position in positions:
             await self.mpd_client.async_delete(position)
 
-        # No need to refresh playlist here as the playlist-changed signal will trigger a refresh
+        # The playlist-changed signal emitted by MPD will drive the refresh.
 
     def on_row_right_click(self, gesture, n_press, x, y, row):
         """Handle right-click on a playlist row"""

@@ -20,14 +20,7 @@ except ImportError:
     print("Please install it with: pip install python-mpd2")
     exit(1)
 
-try:
-    import snapcast.control
-except ImportError:
-    logging.warning("Warning: python-snapcast library not found.")
-    logging.warning("Please install it with: pip install python-snapcast")
-    HAS_SNAPCAST = False
-else:
-    HAS_SNAPCAST = True
+from galliard.mpd_snapcast import HAS_SNAPCAST, SnapcastController  # noqa: E402
 
 
 class MPDConn(GObject.Object):
@@ -64,48 +57,46 @@ class MPDConn(GObject.Object):
     }
 
     def __init__(self, config):
-        """Initialize the MPD client wrapper"""
+        """Prepare MPD client state; no network I/O until ``connect_to_server``."""
         super().__init__()
         self.config = config
         self.client = mpd.asyncio.MPDClient()
         self.connected = False
         self.current_song = None
         self.status = {}
-
-        # Store previous status values for comparison
         self.prev_status = {}
 
-        # Event loop - get the existing one or create new one
+        # Run asyncio on the GLib main loop so coroutine callbacks are
+        # already on the UI thread -- no idle_add marshalling needed
+        # inside async code.
         policy = GLibEventLoopPolicy()
         asyncio.set_event_loop_policy(policy)
         self.loop = policy.get_event_loop()
 
-        # Status monitoring task
         self.monitor_task = None
         self.stop_monitoring = asyncio.Event()
 
-        # Reconnection handling
         self.reconnect_task = None
         self.stop_reconnecting = asyncio.Event()
         self.reconnect_interval = 5  # seconds between reconnection attempts
         self.auto_reconnect = True
 
-        # Command semaphore to prevent more than 50 simultaneous MPD commands
+        # Two semaphores so bulk low-priority commands (e.g. readpicture
+        # during a library scroll) can't starve interactive ones.
         self.high_prio_cmd_sem = asyncio.Semaphore(50)
         self.low_prio_cmd_sem = asyncio.Semaphore(5)
 
-        # Add Snapcast related properties
-        self.snapcast_client = None
-        self.snapcast_server = None
-        self.snapcast_client_id = self.config.get("snapcast.client_id", "")
-        self.snapcast_volume = 0
-        self.snapcast_clients = []
-
-        # Image cache using XDG cache directory with in-memory LRU cache
+        self.snapcast = SnapcastController(self)
         self.image_cache = ImageCache()
 
     async def _execute_command(self, cmd, *args, **kwargs) -> Any:
-        """Execute MPD command with async lock to prevent concurrent access"""
+        """Run ``cmd`` against the MPD client under a concurrency semaphore.
+
+        Connection errors trigger a reconnection task and emit
+        ``connection-error``. Other MPD errors surface via the same
+        signal but don't reconnect. Returns the command result or None
+        on error.
+        """
         if not self.connected and cmd != "connect":
             return None
 
@@ -115,14 +106,12 @@ class MPDConn(GObject.Object):
         async with (self.high_prio_cmd_sem if priority == True else self.low_prio_cmd_sem):
             try:
                 if cmd == "connect":
-                    # Special handling for connect
                     host, port, timeout, password = args
                     await self.client.connect(host, port, timeout)
                     if password:
                         await self.client.password(password)  # type: ignore
                     return True
                 else:
-                    # Execute any other MPD command
                     func = getattr(self.client, cmd)
                     result = await func(*args, **kwargs)
                     return result
@@ -134,33 +123,29 @@ class MPDConn(GObject.Object):
                 OSError,
             ) as e:
                 print("MPD error:", e)
-
-                # Schedule reconnection if needed
                 asyncio.create_task(self._schedule_reconnection())
-
-                # Emit error signal via GLib main context
                 if "Connection" in str(e):
                     idle_add_once(self.emit, "connection-error", "Connection lost")
                 else:
                     idle_add_once(self.emit, "connection-error", str(e))
                 return None
             except Exception as e:
+                # python-mpd2's disconnect() synchronously sets its internal
+                # __command_queue to None, so any command in flight (notably
+                # the chunked readpicture) crashes with AttributeError when
+                # it next tries to ``put`` onto the queue. That's a harmless
+                # race -- log at debug so it doesn't spam stdout.
+                if not self.client.connected:
+                    logging.debug(f"{cmd} aborted mid-flight by disconnect: {e}")
+                    return None
                 print(f"Unexpected error executing {cmd}: {e}")
                 return None
 
     def connect_signal(self, signal_name, callback_func, *user_data):
-        """Connect a callback function to a signal
+        """Attach ``callback_func`` to ``signal_name``, returning the handler id.
 
-        Args:
-            signal_name (str): Name of the signal to connect to (e.g., 'connected', 'song-changed')
-            callback_func (callable): Function to call when signal is emitted
-            *user_data: Optional additional data to pass to the callback function
-
-        Returns:
-            int: Signal handler ID that can be used to disconnect the signal
-
-        Raises:
-            ValueError: If signal_name is not a valid signal
+        Raises :class:`ValueError` for unknown signal names so typos fail
+        loudly rather than silently not firing.
         """
         valid_signals = [
             "connected",
@@ -192,27 +177,19 @@ class MPDConn(GObject.Object):
         if not callable(callback_func):
             raise TypeError("Callback must be a callable function")
 
-        # Connect the signal and return the handler ID
         handler_id = super().connect(signal_name, callback_func, *user_data)
         return handler_id
 
     def disconnect_signal(self, handler_id):
-        """Disconnect a previously connected signal handler
-
-        Args:
-            handler_id (int): Signal handler ID returned from connect_signal
-        """
+        """Detach a handler previously returned by :meth:`connect_signal`."""
         if handler_id:
             super().disconnect(handler_id)
 
     async def _connect(self, force_reconnect=False):
-        """Connect to MPD server asynchronously
+        """Open the MPD connection, start the status monitor, return success.
 
-        Args:
-            force_reconnect (bool): Force reconnection even if already connected
-
-        Returns:
-            bool: True if connection successful, False otherwise
+        ``force_reconnect=True`` bypasses the "already connected" early-out
+        so the reconnection loop can re-establish a new client instance.
         """
         if self.connected and not force_reconnect:
             return True
@@ -222,94 +199,83 @@ class MPDConn(GObject.Object):
         password = self.config.get("mpd.password", None)
         timeout = self.config.get("mpd.timeout", 10)
 
-        # Execute connect command
         result = await self._execute_command("connect", host, port, timeout, password)
         if result:
             self.connected = True
             idle_add_once(self.emit, "connected")
 
-            # Reset previous status
             self.prev_status = {}
 
-            # Start monitoring task
             self.stop_monitoring.clear()
             self.monitor_task = asyncio.create_task(self._monitor_status())
 
-            # Clear reconnection flag if we were in a reconnection state
             self.stop_reconnecting.set()
 
-            if self.supports_snapcast() and self.config.get("volume.method", "mpd").lower() == "snapcast":
-                await self._connect_snapcast()
+            if self._uses_snapcast_for_volume():
+                await self.snapcast.connect()
 
             return True
         else:
-            # Start reconnection task
             await self._schedule_reconnection()
             return False
 
     async def _reconnection_loop(self):
-        """Asynchronous loop that attempts to reconnect to MPD server"""
+        """Retry ``_connect`` every ``reconnect_interval`` seconds until success."""
         idle_add_once(self.emit, "connecting")
 
         while not self.stop_reconnecting.is_set():
             if not self.connected:
                 print("Attempting to reconnect to MPD server...")
 
-                # Stop monitoring task if running
                 await self._stop_monitoring_task()
 
-                # Try to create a new client instance
+                # python-mpd2 doesn't recover a dead client cleanly; build a
+                # fresh one before each attempt.
                 try:
                     self.client = mpd.asyncio.MPDClient()
                 except Exception as e:
                     print(f"Error creating new MPD client: {e}")
 
-                # Attempt reconnection using our regular connect method
-                # But bypass the normal "already connected" check
                 if await self._connect(force_reconnect=True):
                     print("Successfully reconnected to MPD server")
-                    return  # Exit reconnection task on successful reconnection
+                    return
                 else:
                     print("Reconnection attempt failed")
 
-            # Wait before trying again
             try:
                 await asyncio.wait_for(
                     self.stop_reconnecting.wait(), self.reconnect_interval
                 )
             except asyncio.TimeoutError:
-                pass  # Just continue the loop
+                pass
 
     async def _schedule_reconnection(self):
-        """Start a task to handle reconnection"""
+        """Kick off the reconnection loop, unless one is already running."""
         if self.reconnect_task and not self.reconnect_task.done():
-            return  # Reconnection task already running
+            return
 
         idle_add_once(self.emit, "connecting-blocked")
 
-        # Ensure we clean up any existing connection
+        # Tear down any half-open connection first so the fresh client
+        # in _reconnection_loop doesn't collide with a stale socket.
         await self._disconnect_internal()
 
-        # Start reconnection task
         self.stop_reconnecting.clear()
         self.reconnect_task = asyncio.create_task(self._reconnection_loop())
 
     def connect_to_server(self):
-        """Connect to MPD server - API method that creates a connect task"""
+        """Public entry point: schedule a connection to the configured server."""
         if self.connected:
             return True
 
         asyncio.create_task(self._schedule_reconnection())
 
     async def _disconnect_internal(self):
-        """Internal disconnect method"""
+        """Close the MPD socket and cancel the monitor/reconnect tasks."""
         if not self.connected:
             return
 
-        # Stop monitoring task if running
         await self._stop_monitoring_task()
-
-        # Stop reconnection task if running
         await self._stop_reconnection_task()
 
         try:
@@ -320,7 +286,7 @@ class MPDConn(GObject.Object):
         self.connected = False
 
     def disconnect_from_server(self):
-        """Disconnect from MPD server - API method"""
+        """Public entry point: disconnect from the MPD server."""
         if not self.connected:
             return
 
@@ -333,137 +299,110 @@ class MPDConn(GObject.Object):
         asyncio.create_task(_disconnect_task())
 
     def is_connected(self):
-        """Check if connected to MPD server"""
+        """Return True when the MPD connection is currently open."""
         return self.connected
 
+    # Simple scalar fields that emit ``signal(coerced_value)`` when they
+    # change vs. the previous status snapshot. Fields needing composite
+    # or multi-arg emission (``repeat`` + ``single``, ``audio``, elapsed's
+    # threshold) are handled inline in ``_emit_status_changes``.
+    _STATUS_FIELDS = [
+        ("volume", "volume-changed", int),
+        ("state", "playback-status-changed", str),
+        ("random", "random-changed", lambda v: v == "1"),
+        ("consume", "consume-changed", lambda v: v == "1"),
+        ("bitrate", "bitrate-changed", int),
+    ]
+
     def _emit_status_changes(self, status):
-        """Emit signals for changed status values"""
-        # Check volume changes
-        if "volume" in status and (
-            "volume" not in self.prev_status
-            or status["volume"] != self.prev_status["volume"]
-        ):
+        """Emit GObject signals for MPD status fields that changed."""
+        for field, signal, coerce in self._STATUS_FIELDS:
+            if field not in status:
+                continue
+            if status[field] == self.prev_status.get(field):
+                continue
             try:
-                volume = int(status["volume"])
-                idle_add_once(self.emit, "volume-changed", volume)
+                value = coerce(status[field])
+            except (ValueError, TypeError):
+                continue
+            idle_add_once(self.emit, signal, value)
+
+        # Elapsed: only emit on first appearance or >0.5s change, so the
+        # monitor loop's one-second polling doesn't spam handlers.
+        if "elapsed" in status:
+            try:
+                new_elapsed = float(status["elapsed"])
+                first_time = "elapsed" not in self.prev_status
+                if first_time or abs(new_elapsed - float(self.prev_status.get("elapsed", 0))) > 0.5:
+                    idle_add_once(self.emit, "elapsed-changed", new_elapsed)
             except (ValueError, TypeError):
                 pass
 
-        # Check playback state changes
-        if "state" in status and (
-            "state" not in self.prev_status
-            or status["state"] != self.prev_status["state"]
-        ):
-            idle_add_once(self.emit, "playback-status-changed", status["state"])
-
-        # Check elapsed time changes
-        if "elapsed" in status and (
-            "elapsed" not in self.prev_status
-            or abs(float(status["elapsed"]) - float(self.prev_status.get("elapsed", 0)))
-            > 0.5
-        ):
-            try:
-                elapsed = float(status["elapsed"])
-                idle_add_once(self.emit, "elapsed-changed", elapsed)
-            except (ValueError, TypeError):
-                pass
-
-        # Check repeat mode changes
-        if (
-            "repeat" in status
-            and (
-                "repeat" not in self.prev_status
-                or status["repeat"] != self.prev_status["repeat"]
-            )
-        ) or (
-            "single" in status
-            and (
-                "single" not in self.prev_status
-                or status["single"] != self.prev_status["single"]
-            )
-        ):
-            repeat = status["repeat"] == "1"
-            single = status["single"] == "1"
+        # Repeat + single are coupled: MPD has a "single-repeat" mode that
+        # only makes sense when both are set, so we emit them together.
+        repeat_changed = "repeat" in status and status["repeat"] != self.prev_status.get("repeat")
+        single_changed = "single" in status and status["single"] != self.prev_status.get("single")
+        if repeat_changed or single_changed:
+            repeat = status.get("repeat") == "1"
+            single = status.get("single") == "1"
             idle_add_once(self.emit, "repeat-changed", repeat, single)
 
-        # Check random mode changes
-        if "random" in status and (
-            "random" not in self.prev_status
-            or status["random"] != self.prev_status["random"]
-        ):
-            random = status["random"] == "1"
-            idle_add_once(self.emit, "random-changed", random)
-
-        # Check consume mode changes
-        if "consume" in status and (
-            "consume" not in self.prev_status
-            or status["consume"] != self.prev_status["consume"]
-        ):
-            consume = status["consume"] == "1"
-            idle_add_once(self.emit, "consume-changed", consume)
-
-        # Check audio format changes
-        if "audio" in status and (
-            "audio" not in self.prev_status
-            or status["audio"] != self.prev_status["audio"]
-        ):
+        # Audio format is "sample_rate:bits:channels" and the signal takes
+        # three args (raw string, sample rate, bits).
+        if "audio" in status and status["audio"] != self.prev_status.get("audio"):
             try:
-                # Audio format is sample_rate:bits:channels
                 parts = status["audio"].split(":")
                 if len(parts) >= 2:
                     sample_rate = int(parts[0])
                     bits = int(parts[1])
-                    # channels = int(parts[2]) if len(parts) > 2 else 2
                     idle_add_once(
                         self.emit, "audio-changed", status["audio"], sample_rate, bits
                     )
             except (ValueError, TypeError, IndexError):
                 pass
 
-        # Check bitrate changes
-        if "bitrate" in status and (
-            "bitrate" not in self.prev_status
-            or status["bitrate"] != self.prev_status["bitrate"]
-        ):
-            try:
-                bitrate = int(status["bitrate"])
-                idle_add_once(self.emit, "bitrate-changed", bitrate)
-            except (ValueError, TypeError):
-                pass
-
-        # Update previous status
         self.prev_status = status.copy()
 
     async def async_get_albums(self) -> list[Album]:
-        """Get all albums asynchronously"""
+        """Return every album in the library as a list of :class:`Album`."""
         if not self.connected:
             return []
         result = await self._execute_command("list", "album") or []
         return [Album(title=item["album"]) for item in result if item.get("album")]
 
     async def async_get_artists(self) -> list[Artist]:
-        """Get all artists asynchronously"""
+        """Return every artist in the library as a list of :class:`Artist`."""
         if not self.connected:
             return []
         artists_data = await self._execute_command("list", "artist") or []
         return [Artist(name=item["artist"]) for item in artists_data if item.get("artist")]
 
     async def async_get_songs_by_artist(self, artist: str) -> list[Song]:
-        """Get songs by artist asynchronously"""
+        """Return every song whose ``artist`` tag matches."""
         if not self.connected:
             return []
         result = await self._execute_command("find", "artist", artist) or []
         return [Song(**item) for item in result]
 
     async def async_get_songs_by_album(self, album: str) -> list[Song]:
-        """Get songs by album asynchronously"""
+        """Return every song whose ``album`` tag matches."""
         if not self.connected:
             return []
         result = await self._execute_command("find", "album", album) or []
         return [Song(**item) for item in result]
 
+    async def async_find(self, *filters: str) -> list[Song]:
+        """Run MPD's ``find`` with tag/value filter pairs.
+
+        Example: ``await mpd.async_find("artist", "Foo", "album", "Bar")``.
+        """
+        if not self.connected:
+            return []
+        result = await self._execute_command("find", *filters) or []
+        return [Song(**item) for item in result]
+
     async def async_get_albums_by_artist(self, artist: str) -> list[Album]:
-        """Get albums by artist asynchronously"""
+        """Return every album tagged with ``artist``."""
         if not self.connected:
             return []
         result = await self._execute_command("list", "album", "artist", artist) or []
@@ -474,27 +413,27 @@ class MPDConn(GObject.Object):
         ]
 
     async def async_search(self, type: str, query: str) -> list[Song]:
-        """Search for songs asynchronously"""
+        """Substring-search the library: ``search(type, query)``."""
         if not self.connected:
             return []
         result = await self._execute_command("search", type, query) or []
         return [Song(**item) for item in result]
 
     async def async_get_current_playlist(self) -> list[Song]:
-        """Get current playlist asynchronously"""
+        """Return the songs in MPD's active playlist (``playlistinfo``)."""
         if not self.connected:
             return []
         result = await self._execute_command("playlistinfo") or []
         return [Song(**item) for item in result]
 
     async def async_get_stored_playlists(self):
-        """Get stored playlists asynchronously"""
+        """Return MPD's saved playlists (raw dicts from ``listplaylists``)."""
         if not self.connected:
             return []
         return await self._execute_command("listplaylists") or []
 
     async def async_get_playlist_songs(self, playlist_name: str) -> list[Song]:
-        """Get songs in stored playlist asynchronously"""
+        """Return the songs in a stored playlist."""
         if not self.connected:
             return []
         result = await self._execute_command("listplaylistinfo", playlist_name) or []
@@ -503,41 +442,27 @@ class MPDConn(GObject.Object):
     async def async_get_album_art(
         self, song_uri: str
     ) -> tuple[bytes | None, str | None, str | None]:
-        """Get album art for a song
+        """Fetch album art for ``song_uri`` via MPD's ``readpicture``.
 
-        Args:
-            song_uri (str): URI of the song to get album art for
-
-        Returns:
-            tuple: (binary_data, mime_type, image_path) if album art exists, (None, None, None) otherwise
-
-        The binary_data can be loaded into a GdkPixbuf using:
-        ```
-        loader = GdkPixbuf.PixbufLoader()
-        loader.write(binary_data)
-        loader.close()
-        pixbuf = loader.get_pixbuf()
-        ```
+        Returns ``(binary_data, mime_type, image_path)`` on success or a
+        triple of Nones when nothing is cached or embedded. Results are
+        memoised through :class:`ImageCache`.
         """
         if not self.connected or not song_uri:
             return None, None, None
 
-        # Check cache
         cached_result = self.image_cache.get(song_uri)
         logging.debug(f"ImageCache: Checked cache for {song_uri}, found: {bool(cached_result)}")
         if cached_result:
             return cached_result
 
         try:
-            # MPD 0.22+ supports readpicture command
+            # readpicture requires MPD 0.22+.
             result = await self._execute_command("readpicture", song_uri)
             if result and "binary" in result:
                 binary_data = result["binary"]
                 mime_type = result.get("mime", "image/jpeg")
-
-                # Store to cache
                 key = self.image_cache.put(song_uri, binary_data, mime_type)
-
                 return binary_data, mime_type, key
         except Exception as e:
             print(f"Error getting album art: {e}")
@@ -545,29 +470,22 @@ class MPDConn(GObject.Object):
         return None, None, None
 
     async def async_get_song_details(self, file_path: str) -> Song | None:
-        """Get detailed information about a song
-
-        Args:
-            file_path (str): Path to the song file in the MPD library
-
-        Returns:
-            dict: Song metadata dictionary or None if not found/error
-        """
+        """Return the :class:`Song` for ``file_path``, or None if not found."""
         if not self.connected or not file_path:
             return None
 
         try:
-            # Use find command with file filter to get full song details
             result = await self._execute_command("find", "file", file_path)
             if result and len(result) > 0:
-                return Song(**result[0])  # Return the first (and should be only) match
+                # find by absolute file path returns a single row.
+                return Song(**result[0])
             return None
         except Exception as e:
             print(f"Error getting song details for {file_path}: {e}")
             return None
 
     async def _stop_monitoring_task(self):
-        """Stop the monitoring task if it's running"""
+        """Signal the status monitor to stop and await its exit."""
         if self.monitor_task and not self.monitor_task.done():
             self.stop_monitoring.set()
             try:
@@ -582,7 +500,7 @@ class MPDConn(GObject.Object):
             self.monitor_task = None
 
     async def _stop_reconnection_task(self):
-        """Stop the reconnection task if it's running"""
+        """Signal the reconnection loop to stop and await its exit."""
         if self.reconnect_task and not self.reconnect_task.done():
             self.stop_reconnecting.set()
             try:
@@ -594,87 +512,81 @@ class MPDConn(GObject.Object):
                 except asyncio.CancelledError:
                     pass
 
-    # New async methods for player control
-
     async def async_play(self, position: int | None = None):
-        """Start playback at optional position asynchronously"""
+        """Start playback, optionally jumping to ``position`` in the queue."""
         if position is not None:
             return await self._execute_command("play", position)
         return await self._execute_command("play")
 
     async def async_pause(self) -> None:
-        """Pause playback asynchronously"""
+        """Pause playback."""
         await self._execute_command("pause")
 
     async def async_stop(self) -> None:
-        """Stop playback asynchronously"""
+        """Stop playback."""
         await self._execute_command("stop")
 
     async def async_next(self) -> None:
-        """Play next track asynchronously"""
+        """Skip to the next track in the queue."""
         await self._execute_command("next")
 
     async def async_previous(self) -> None:
-        """Play previous track asynchronously"""
+        """Skip to the previous track in the queue."""
         await self._execute_command("previous")
 
     async def async_seek(self, position: int) -> None:
-        """Seek to position in seconds asynchronously"""
+        """Seek the current song to ``position`` seconds."""
         await self._execute_command("seekcur", position)
 
     async def async_delete(self, position: int) -> None:
-        """Delete song at position from current playlist asynchronously"""
+        """Remove the song at ``position`` from the current playlist."""
         await self._execute_command("delete", position)
 
     async def async_clear_playlist(self) -> None:
-        """Clear the current playlist asynchronously"""
+        """Empty the current playlist."""
         await self._execute_command("clear")
 
     async def async_set_volume(self, volume: int) -> None:
-        """Set volume (0-100) asynchronously"""
-        # Check if we're using Snapcast for volume control
-        if self.supports_snapcast():
-            if self.config.get("volume.method", "mpd").lower() == "snapcast":
-                await self._async_set_snapcast_volume(volume)
-            else:
-                await self._execute_command("setvol", volume)
+        """Set the volume (0-100), routing to Snapcast when configured."""
+        if self._uses_snapcast_for_volume():
+            await self.snapcast.set_volume(volume)
         else:
             await self._execute_command("setvol", volume)
 
+    def _uses_snapcast_for_volume(self) -> bool:
+        """True when the user has opted into Snapcast-driven volume control."""
+        return (
+            self.supports_snapcast()
+            and self.config.get("volume.method", "mpd").lower() == "snapcast"
+        )
+
     async def async_set_random(self, random: str) -> None:
-        """Set random playback asynchronously"""
+        """Toggle MPD's random mode; accepts "0"/"1" string for consistency with MPD."""
         if not self.connected:
             return None
         await self._execute_command("random", "1" if random == "1" else "0")
 
     async def async_set_repeat(self, repeat: str) -> None:
-        """Set repeat mode asynchronously"""
+        """Toggle MPD's repeat mode."""
         if not self.connected:
             return None
         await self._execute_command("repeat", "1" if repeat == "1" else "0")
 
     async def async_set_single(self, single: str) -> None:
-        """Set single mode asynchronously"""
+        """Toggle MPD's single-song repeat mode."""
         if not self.connected:
             return None
         await self._execute_command("single", "1" if single == "1" else "0")
 
     async def async_toggle_consume(self) -> None:
-        """Toggle consume mode asynchronously"""
+        """Flip MPD's consume mode."""
         if not self.connected:
             return None
         consume = int(self.status.get("consume", "0"))
         await self._execute_command("consume", 1 - consume)
 
     async def async_list_directory(self, directory_path: str = "") -> list[dict]:
-        """List contents of a directory in the MPD music library asynchronously
-
-        Args:
-            directory_path (str): Path to list, empty string for root directory
-
-        Returns:
-            list: Directory contents with metadata, or empty list on error/empty directory
-        """
+        """List directory contents (``lsinfo``); empty string means root."""
         if not self.connected:
             return []
 
@@ -685,24 +597,15 @@ class MPDConn(GObject.Object):
             return []
 
     async def async_add_songs_to_playlist(self, song_uris: list[str]) -> bool:
-        """Add multiple songs to the current playlist using batch commands
-
-        Args:
-            song_uris (list): List of song URIs to add to the playlist
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
+        """Append ``song_uris`` to the current playlist; emit playlist-changed."""
         if not self.connected or not song_uris:
             return False
 
         try:
-            # Add each song to the command list
             for uri in song_uris:
                 await self.client.add(  # pyright: ignore[reportAttributeAccessIssue]
                     uri
                 )
-            # Emit playlist-changed signal
             idle_add_once(self.emit, "playlist-changed")
             return True
         except Exception as e:
@@ -710,179 +613,11 @@ class MPDConn(GObject.Object):
             return False
 
     def supports_snapcast(self) -> bool:
-        """Check if Snapcast support is available"""
+        """True when the python-snapcast library is importable."""
         return HAS_SNAPCAST
 
-    async def _connect_snapcast(self) -> bool:
-        """Connect to Snapcast server asynchronously"""
-        if not HAS_SNAPCAST:
-            logging.warning("Cannot connect to Snapcast: python-snapcast library not installed")
-            return False
-
-        host = self.config.get("snapcast.host", "localhost")
-        port = self.config.get("snapcast.port", 1780)
-
-        try:
-            # Create a new Snapcast server connection
-            server = await snapcast.control.create_server(  # type: ignore
-                self.loop, host, port
-            )
-            self.snapcast_server = server
-
-            # Get available clients
-            self.snapcast_clients = [
-                {
-                    "id": client.identifier,
-                    "name": client.friendly_name or client.identifier,
-                    "connected": client.connected,
-                    "volume": client.volume,
-                }
-                for client in server.clients
-            ]
-
-            # Select client to control
-            await self._select_snapcast_client()
-
-            print(f"Connected to Snapcast server at {host}:{port}")
-            return True
-        except Exception as e:
-            print(f"Error connecting to Snapcast server: {e}")
-            return False
-
-    async def _select_snapcast_client(self) -> None:
-        """Select the Snapcast client to control based on config"""
-        if not self.snapcast_server:
-            return
-
-        client_id = self.config.get("snapcast.client_id", "")
-        if not client_id and self.snapcast_server.clients:
-            # If no client is selected, use the first available one
-            self.snapcast_client = self.snapcast_server.clients[0]
-            self.config.set("snapcast.client_id", self.snapcast_client.identifier)
-            print(
-                f"No Snapcast client selected, using {self.snapcast_client.friendly_name}"
-            )
-        else:
-            # Find the selected client
-            for client in self.snapcast_server.clients:
-                if client.identifier == client_id:
-                    self.snapcast_client = client
-                    self.snapcast_volume = client.volume
-                    print(f"Selected Snapcast client: {client.friendly_name}")
-                    break
-            else:
-                print(f"Selected Snapcast client '{client_id}' not found")
-                if self.snapcast_server.clients:
-                    self.snapcast_client = self.snapcast_server.clients[0]
-                    self.config.set(
-                        "snapcast.client_id", self.snapcast_client.identifier
-                    )
-
-    async def _async_set_snapcast_volume(self, volume: int) -> bool:
-        """Set volume using Snapcast API"""
-        if not HAS_SNAPCAST:
-            print("Cannot set Snapcast volume: python-snapcast library not installed")
-            return False
-
-        if not self.snapcast_client:
-            # Try to connect to Snapcast if not already connected
-            if not self.snapcast_server:
-                await self._connect_snapcast()
-
-            if not self.snapcast_client:
-                print("No Snapcast client selected")
-                return False
-
-        try:
-            # Set volume
-            await self.snapcast_client.set_volume(volume)
-            self.snapcast_volume = volume
-            # Emit volume change signal
-            idle_add_once(self.emit, "volume-changed", volume)
-            return True
-        except Exception as e:
-            print(f"Error setting Snapcast volume: {e}")
-            # Try to reconnect
-            await self._connect_snapcast()
-            return False
-
-    async def async_get_snapcast_clients(
-        self, host: str | None = None, port: int | None = None
-    ) -> bool:
-        """Get list of Snapcast clients asynchronously
-
-        Args:
-            callback (callable): Function to call with client list
-            host (str): Snapcast server host
-            port (int): Snapcast server port
-        """
-        if not HAS_SNAPCAST:
-            print("Cannot get Snapcast clients: python-snapcast library not installed")
-            return False
-
-        if host is None:
-            host = self.config.get("snapcast.host", "localhost")
-        if port is None:
-            port = int(self.config.get("snapcast.port", 1780))
-
-        try:
-            # Create a new Snapcast server connection
-            server = await snapcast.control.create_server(  # type: ignore
-                self.loop, host, port
-            )
-
-            # Extract client information
-            clients = [
-                {
-                    "id": client.identifier,
-                    "name": client.friendly_name or client.identifier,
-                    "connected": client.connected,
-                    "volume": client.volume,
-                }
-                for client in server.clients
-            ]
-            print(clients)
-
-            # Store clients for later use
-            self.snapcast_clients = clients
-
-            # Clean up temporary connection
-            if server != self.snapcast_server:
-                server.stop()
-
-            return True
-
-        except Exception as e:
-            print(f"Error getting Snapcast clients: {e}")
-            return False
-
-    async def async_get_snapcast_volume(self) -> int | None:
-        """Get current volume from Snapcast"""
-        if not HAS_SNAPCAST:
-            print("Cannot get Snapcast volume: python-snapcast library not installed")
-            return None
-
-        if not self.snapcast_client:
-            # Try to connect to Snapcast if not already connected
-            if not self.snapcast_server:
-                await self._connect_snapcast()
-
-            if not self.snapcast_client:
-                print("No Snapcast client selected")
-                return None
-
-        try:
-            # Refresh client information
-            self.snapcast_volume = self.snapcast_client.volume
-            return self.snapcast_volume
-        except Exception as e:
-            print(f"Error getting Snapcast volume: {e}")
-            # Try to reconnect
-            await self._connect_snapcast()
-            return None
-
     async def _monitor_status(self) -> None:
-        """Monitor MPD status changes asynchronously"""
+        """Poll MPD status once per second and emit change signals."""
         last_song_id = None
         last_playlist_version = None
         last_volume_check = 0
@@ -890,76 +625,71 @@ class MPDConn(GObject.Object):
         while not self.stop_monitoring.is_set() and self.connected:
             print("checking MPD status...")
             try:
-                # Get status using async command
                 status = await self._execute_command("status")
                 if not status:
-                    # If status fetch failed, wait a bit and retry
+                    # Transient fetch failure: back off one tick and retry.
                     try:
                         await asyncio.wait_for(self.stop_monitoring.wait(), 1)
                         continue
                     except asyncio.TimeoutError:
-                        continue  # Continue the loop after timeout
+                        continue
 
-                # If using Snapcast for volume, override the volume value
-                if self.supports_snapcast() and self.config.get("volume.method", "mpd").lower() == "snapcast":
-                    # Override volume in status with Snapcast volume
-                    status["volume"] = str(self.snapcast_volume)
+                if self._uses_snapcast_for_volume():
+                    status["volume"] = str(self.snapcast.volume)
 
                 self.status = status
 
-                # If using Snapcast for volume, periodically check its volume
+                # Snapcast exposes per-client volume separately; poll it
+                # every 5 seconds so the UI catches external volume changes
+                # without hammering the Snapcast server.
                 current_time = time.time()
                 if (
-                    self.supports_snapcast()
-                    and self.config.get("volume.method", "mpd").lower() == "snapcast"
+                    self._uses_snapcast_for_volume()
                     and current_time - last_volume_check > 5
-                ):  # Check every 5 seconds
-                    snapcast_volume = await self.async_get_snapcast_volume()
+                ):
+                    snapcast_volume = await self.snapcast.get_volume()
                     if (
                         snapcast_volume is not None
-                        and snapcast_volume != self.snapcast_volume
+                        and snapcast_volume != self.snapcast.volume
                     ):
-                        self.snapcast_volume = snapcast_volume
+                        self.snapcast.volume = snapcast_volume
                         idle_add_once(self.emit, "volume-changed", snapcast_volume)
                     last_volume_check = current_time
+                    status["volume"] = str(self.snapcast.volume)
 
-                    # Update the volume in status for compatibility
-                    status["volume"] = str(self.snapcast_volume)
-
-                # Emit granular status change signals
                 self._emit_status_changes(status)
 
-                # Check if song changed
                 current_song_id = status.get("songid")
                 if current_song_id != last_song_id:
                     last_song_id = current_song_id
                     if current_song_id:
-                        self.current_song = await self._execute_command("currentsong")
-                        if self.current_song:
-                            # Add bitrate to current song data
+                        song_data = await self._execute_command("currentsong")
+                        if song_data:
+                            self.current_song = Song(**song_data)
                             bitrate_value = status.get("bitrate", None)
-                            self.current_song["bitrate"] = (
+                            self.current_song.bitrate = (
                                 f"{bitrate_value} kbps" if bitrate_value else "Unknown"
                             )
+                        else:
+                            self.current_song = None
                     else:
                         self.current_song = None
 
                     idle_add_once(self.emit, "song-changed")
 
-                # Check if playlist changed
                 playlist_version = status.get("playlist")
                 if playlist_version != last_playlist_version:
                     last_playlist_version = playlist_version
                     idle_add_once(self.emit, "playlist-changed")
 
-                # Always emit state changed for updating UI
+                # state-changed fires unconditionally so UI elements that
+                # depend on any status field (e.g. the progress bar) refresh.
                 idle_add_once(self.emit, "state-changed")
 
-                # Sleep for a short time before polling again
                 try:
                     await asyncio.wait_for(self.stop_monitoring.wait(), 1)
                 except asyncio.TimeoutError:
-                    pass  # Just continue the loop
+                    pass
 
             except Exception as e:
                 print(f"Monitor error: {e}")

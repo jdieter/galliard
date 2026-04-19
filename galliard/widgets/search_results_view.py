@@ -2,18 +2,20 @@ import gi
 import logging
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gdk, Gio  # noqa: E402
+from gi.repository import Gtk, Gio  # noqa: E402
 
 from galliard.models import FileItem  # noqa: E402
-from galliard.utils.album_art import get_album_art_as_pixbuf  # noqa: E402
-from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
+from galliard.utils.album_art import fetch_art_async  # noqa: E402
+from galliard.utils.async_task_queue import AsyncUIHelper  # noqa: E402
 from galliard.utils.glib import idle_add_once  # noqa: E402
 from galliard.utils.sorting import get_sort_key  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
+from galliard.utils.gtk_styling import apply_compact_tree_css  # noqa: E402
+from galliard.widgets.mpd_item_row import build_compact_tree_row  # noqa: E402
 
 
 class SearchResultsView(Gtk.ScrolledWindow):
-    """Search results view with hierarchical organization"""
+    """Grouped search results: Artist / Album / Title / Date hierarchies."""
 
     def __init__(self, mpd_conn):
         super().__init__()
@@ -69,109 +71,16 @@ class SearchResultsView(Gtk.ScrolledWindow):
         self.set_child(self.results_tree)
 
         # Apply CSS for compact rows
-        self._apply_css()
-
-    def _apply_css(self):
-        """Apply CSS styling to make the tree more compact"""
-        # First, make sure the results_tree has a name so we can target it with CSS
         self.results_tree.set_name("search-results-tree")
-
-        # Create a CSS provider
-        css_provider = Gtk.CssProvider()
-
-        # Define the CSS to reduce row height
-        css = b"""
-        #search-results-tree {
-            /* Reduce the overall padding in the tree */
-            padding: 0;
-        }
-
-        #search-results-tree row {
-            /* Reduce the vertical padding for each row */
-            padding-top: 0px;
-            padding-bottom: 0px;
-            min-height: 20px; /* Adjust this value to get the desired row height */
-        }
-
-        #search-results-tree cell {
-            /* Reduce the vertical padding for each row */
-            padding-top: 1px;
-            padding-bottom: 1px;
-            min-height: 20px; /* Adjust this value to get the desired row height */
-        }
-
-        .compact {
-            padding-top: 0;
-            padding-bottom: 0;
-            margin-top: 0;
-            margin-bottom: 0;
-        }
-
-        #compact-expander {
-            /* Make expander button more compact */
-            padding-top: 0;
-            padding-bottom: 0;
-            min-height: 16px;
-            min-width: 16px;
-        }
-
-        #compact-expander image {
-            /* Make the icon inside the button smaller */
-            -gtk-icon-size: 12px;
-        }
-        """
-
-        # Load the CSS
-        css_provider.load_from_data(css)
-
-        # Add the CSS provider to the display
-        if display := Gdk.Display.get_default():
-            Gtk.StyleContext.add_provider_for_display(
-                display,
-                css_provider,
-                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-            )
+        apply_compact_tree_css("search-results-tree")
 
     def _item_setup(self, factory, list_item):
         """Setup function for items"""
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        box.set_margin_start(0)
-        box.set_margin_end(0)
-        box.set_margin_top(0)
-        box.set_margin_bottom(0)
-
-        # Expander for categories
-        expander = Gtk.Button.new_from_icon_name("pan-end-symbolic")
-        expander.add_css_class("flat")
-        expander.set_visible(False)
-        expander.set_name("compact-expander")
-        box.append(expander)
-
-        # Icon/album art
-        image = Gtk.Image()
-        image.set_size_request(20, 20)
-        image.add_css_class("compact")
-        box.append(image)
-
-        # Label
-        label = Gtk.Label()
-        label.set_halign(Gtk.Align.START)
-        label.set_hexpand(True)
-        label.add_css_class("compact")
-        box.append(label)
-
-        list_item.set_child(box)
-        list_item.image = image
-        list_item.label = label
-        list_item.expander = expander
-
-        expander.connect("clicked", self._on_expander_clicked, list_item)
-
-        # Add context menu support
-        gesture_click = Gtk.GestureClick.new()
-        gesture_click.set_button(3)  # Right mouse button
-        gesture_click.connect("pressed", self._on_item_right_click, list_item)
-        box.add_controller(gesture_click)
+        build_compact_tree_row(
+            list_item,
+            on_expand=self._on_expander_clicked,
+            on_context=self._on_item_right_click,
+        )
 
     def _item_bind(self, factory, list_item):
         """Bind item data to widgets"""
@@ -329,8 +238,8 @@ class SearchResultsView(Gtk.ScrolledWindow):
 
     def _format_track_title(self, song):
         """Format song title with track number if available"""
-        track = self._get_field_value(song, 'track')
-        title = self._get_field_value(song, 'title') or 'Unknown'
+        track = song.get('track')
+        title = song.get('title') or 'Unknown'
 
         if track:
             # Handle track numbers like "1/12" or "1"
@@ -338,13 +247,6 @@ class SearchResultsView(Gtk.ScrolledWindow):
                 track = track.split('/')[0]
             return f"{track}. {title}"
         return title
-
-    def _get_field_value(self, song, field):
-        """Get a field value from a song, handling list values"""
-        value = getattr(song, field, None)
-        if isinstance(value, list):
-            return value[0] if value else None
-        return value
 
     def _create_album_sort_key(self, album_years):
         """Create a sort key function for albums based on year then name"""
@@ -358,8 +260,8 @@ class SearchResultsView(Gtk.ScrolledWindow):
         """Create a FileItem for a song with optional artist suffix"""
         title = self._format_track_title(song)
 
-        song_artist = self._get_field_value(song, 'artist')
-        grouped_artist = self._get_field_value(song, 'albumartist')
+        song_artist = song.get('artist')
+        grouped_artist = song.get('albumartist')
         if grouped_artist is not None and song_artist is not None and search_term.lower() not in grouped_artist.lower():
             name = f"{title} - {song_artist}"
         else:
@@ -376,8 +278,8 @@ class SearchResultsView(Gtk.ScrolledWindow):
     def _create_title_file_item(self, song):
         """Create a FileItem for a title match with album art"""
         title = self._format_track_title(song)
-        album = self._get_field_value(song, 'album') or 'Unknown'
-        artist = self._get_field_value(song, 'artist') or 'Unknown'
+        album = song.get('album') or 'Unknown'
+        artist = song.get('artist') or 'Unknown'
 
         title_item = FileItem(
             name=f"{title} - {album} - {artist}",
@@ -387,13 +289,13 @@ class SearchResultsView(Gtk.ScrolledWindow):
             pixbuf=None,
         )
 
-        # Load album art for this song
-        AsyncUIHelper.run_async_operation(
-            self._load_album_art,
-            lambda result, item=title_item: self._update_item_art(item, result),
-            song.file,
+        # Load album art for this song into the FileItem's pixbuf slot.
+        fetch_art_async(
+            self.mpd_conn,
+            song,
+            200,
+            lambda pixbuf, item=title_item: self._apply_art_to_item(item, pixbuf),
             task_id=f"load_title_art_search_{self.counter}",
-            task_priority=110,  # Lower priority for album art loading
         )
         self.counter += 1
 
@@ -413,14 +315,14 @@ class SearchResultsView(Gtk.ScrolledWindow):
             for song in songs
         ]
 
-        # Load album art from the first song
+        # Load album art from the first song into the FileItem's pixbuf slot.
         if songs:
-            AsyncUIHelper.run_async_operation(
-                self._load_album_art,
-                lambda result, item=album_item: self._update_item_art(item, result),
-                songs[0].file,
+            fetch_art_async(
+                self.mpd_conn,
+                songs[0],
+                200,
+                lambda pixbuf, item=album_item: self._apply_art_to_item(item, pixbuf),
                 task_id=f"load_album_art_search_{self.counter}",
-                task_priority=110,  # Lower priority for album art loading
             )
 
         return album_item
@@ -430,7 +332,7 @@ class SearchResultsView(Gtk.ScrolledWindow):
         years = {}
 
         for song in songs:
-            year = self._get_field_value(song, "date")
+            year = song.get("date")
             if year is None:
                 year = "Unknown"
             if year not in years:
@@ -458,9 +360,9 @@ class SearchResultsView(Gtk.ScrolledWindow):
         artists = {}
 
         for song in songs:
-            artist = self._get_field_value(song, "albumartist")
+            artist = song.get("albumartist")
             if artist is None:
-                artist = self._get_field_value(song, "artist")
+                artist = song.get("artist")
             if artist is None:
                 artist = "Unknown"
             if artist not in artists:
@@ -484,60 +386,42 @@ class SearchResultsView(Gtk.ScrolledWindow):
         return artist_items
 
     def _build_album_hierarchy(self, songs, search_term):
-        """Build album → song hierarchy, sorted by year then name"""
-        albums = {}
-        album_years = {}
+        """Build album → song hierarchy, sorted by year then name.
+
+        Keys by (album_name, albumartist_or_artist, year) so two distinct
+        releases that happen to share a title (different artists, reissues,
+        etc.) stay separate. The displayed row is still just the album name.
+        """
+        groups: dict[tuple, list] = {}
 
         for song in songs:
-            album = self._get_field_value(song, "album")
-            if album is None:
-                album = "Unknown"
-            year = getattr(song, "date", None)
-            if isinstance(year, list):
-                year = year[0] if year else None
+            album = song.get("album") or "Unknown"
+            artist = song.get("albumartist") or song.get("artist") or "Unknown"
+            year = song.get("date")
+            groups.setdefault((album, artist, year), []).append(song)
 
-            if album not in albums:
-                albums[album] = []
-                album_years[album] = year
+        def sort_key(key):
+            album_name, artist, year = key
+            year_sort = int(year) if year and str(year).isdigit() else 9999
+            return (year_sort, get_sort_key(album_name), artist)
 
-            albums[album].append(song)
-            # Prefer earliest year if multiple
-            if year and (album_years[album] is None or year < album_years[album]):
-                album_years[album] = year
-
-        # Build FileItem tree
-        album_sort_key = self._create_album_sort_key(album_years)
         album_items = []
-        for album in sorted(albums.keys(), key=album_sort_key):
-            album_item = self._create_album_file_item(
-                album, albums[album], search_term
+        for key in sorted(groups.keys(), key=sort_key):
+            album_name, _artist, _year = key
+            album_items.append(
+                self._create_album_file_item(album_name, groups[key], search_term)
             )
-            album_items.append(album_item)
-
         return album_items
 
-    async def _load_album_art(self, audio_file):
-        """Load album art for an audio file"""
-        try:
-            return await get_album_art_as_pixbuf(
-                self.mpd_conn, audio_file, 200
-            )
-        except Exception as e:
-            print(f"Error getting album art for {audio_file}: {e}")
-            return None
-
-    def _update_item_art(self, file_item, pixbuf):
-        """Update file item with album art"""
-        if pixbuf:
-            # Always store the pixbuf on the file_item
-            file_item.pixbuf = pixbuf
-            file_item.icon_name = None
-
-            # If the item is already bound, update the display immediately
-            if file_item.list_item is not None:
-                file_item.list_item.image.set_from_pixbuf(pixbuf)
-                # Notify model that item has changed
-                idle_add_once(self.results_tree.queue_draw)
+    def _apply_art_to_item(self, file_item, pixbuf):
+        """Store the fetched pixbuf on the FileItem and refresh any bound row."""
+        if not pixbuf:
+            return
+        file_item.pixbuf = pixbuf
+        file_item.icon_name = None
+        if file_item.list_item is not None:
+            file_item.list_item.image.set_from_pixbuf(pixbuf)
+            idle_add_once(self.results_tree.queue_draw)
 
     def _on_item_right_click(self, gesture, n_press, x, y, list_item):
         """Handle right-click on items"""

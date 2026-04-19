@@ -3,30 +3,28 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
-from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
+from galliard.utils.async_task_queue import AsyncUIHelper  # noqa: E402
 from galliard.widgets.files_view import FilesView  # noqa: E402
 from galliard.widgets.artists_view import ArtistsView  # noqa: E402
 from galliard.widgets.albums_view import AlbumsView  # noqa: E402
 
 
 class LibraryView(Gtk.Box):
-    """Library view widget for Galliard"""
+    """Library pane: a Files / Artists / Albums switcher over a Gtk.Stack."""
 
     def __init__(self, mpd_client):
+        """Build the sub-views and watch for MPD connect/disconnect."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.mpd_client = mpd_client
-        self.current_view = "files"  # files, artists, albums
+        self.current_view = "files"
 
-        # Create UI
         self.create_ui()
 
-        # Connect signals
         self.mpd_client.connect_signal("connected", self.on_mpd_connected)
         self.mpd_client.connect_signal("disconnected", self.on_mpd_disconnected)
 
     def create_ui(self):
-        """Create the user interface"""
-        # Create header
+        """Build the toolbar (view toggles + refresh) and the content stack."""
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         header_box.add_css_class("toolbar")
         header_box.set_margin_start(6)
@@ -34,30 +32,23 @@ class LibraryView(Gtk.Box):
         header_box.set_margin_top(6)
         header_box.set_margin_bottom(6)
 
-        # View switcher
         view_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         view_box.add_css_class("linked")
 
-        # Files button
-        self.files_button = Gtk.ToggleButton(
-            label="Files", active=True  # Start with files view active
-        )
+        self.files_button = Gtk.ToggleButton(label="Files", active=True)
         self.files_button.connect("toggled", self.on_view_toggled, "files")
         view_box.append(self.files_button)
 
-        # Artists button
         self.artists_button = Gtk.ToggleButton(label="Artists")
         self.artists_button.connect("toggled", self.on_view_toggled, "artists")
         view_box.append(self.artists_button)
 
-        # Albums button
         self.albums_button = Gtk.ToggleButton(label="Albums")
         self.albums_button.connect("toggled", self.on_view_toggled, "albums")
         view_box.append(self.albums_button)
 
         header_box.append(view_box)
 
-        # Add refresh button
         refresh_button = Gtk.Button(
             icon_name="view-refresh-symbolic", tooltip_text="Refresh library"
         )
@@ -67,35 +58,29 @@ class LibraryView(Gtk.Box):
 
         self.append(header_box)
 
-        # Create main content
         self.content_stack = Gtk.Stack()
         self.content_stack.set_vexpand(True)
 
-        # Create the view components
         self.files_view = FilesView(self.mpd_client)
         self.artists_view = ArtistsView(self.mpd_client)
         self.albums_view = AlbumsView(self.mpd_client)
 
-        # Add views to the stack
         self.content_stack.add_named(self.files_view, "files")
         self.content_stack.add_named(self.artists_view, "artists")
         self.content_stack.add_named(self.albums_view, "albums")
 
-        # Set initial view
         self.content_stack.set_visible_child_name("files")
 
         self.append(self.content_stack)
 
     def on_view_toggled(self, button, view_name):
-        """Handle view toggle button"""
+        """Swap the stack to the selected view and deactivate the other toggles."""
         if button.get_active():
             self.content_stack.set_visible_child_name(view_name)
             self.current_view = view_name
-            AsyncUIHelper.run_async_operation(
-                self.refresh_library, None  # No callback needed
-            )
+            AsyncUIHelper.run_async_operation(self.refresh_library, None)
 
-            # Ensure only one toggle button is active
+            # ToggleButtons don't implement radio behaviour on their own.
             for btn, name in [
                 (self.files_button, "files"),
                 (self.artists_button, "artists"),
@@ -105,28 +90,22 @@ class LibraryView(Gtk.Box):
                     btn.set_active(False)
 
     def on_refresh_clicked(self, button):
-        """Handle refresh button click"""
-        AsyncUIHelper.run_async_operation(
-            self.refresh_library, None  # No callback needed
-        )
+        """Toolbar refresh button: reload the current library view."""
+        AsyncUIHelper.run_async_operation(self.refresh_library, None)
 
     def on_mpd_connected(self, client):
-        """Handle MPD connection"""
-        AsyncUIHelper.run_async_operation(
-            self.refresh_library, None  # No callback needed
-        )
+        """On reconnect, reload the current view to pick up library changes."""
+        AsyncUIHelper.run_async_operation(self.refresh_library, None)
 
     def on_mpd_disconnected(self, client):
-        """Handle MPD disconnection"""
-        # Nothing to do, each view handles its own state
+        """No-op: the sub-views manage their own empty-state."""
         pass
 
     async def refresh_library(self):
-        """Refresh the current view"""
+        """Ask the currently-visible sub-view to reload from MPD."""
         if not self.mpd_client.is_connected():
             return
 
-        # Refresh current view
         if self.current_view == "files":
             self.files_view.refresh()
         elif self.current_view == "artists":

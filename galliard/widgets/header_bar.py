@@ -4,48 +4,42 @@ import logging
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Gio, Adw  # noqa: E402
-from galliard.utils.glib import idle_add_once  # noqa: E402
 
 
 class HeaderBar(Gtk.Box):
-    """Header bar widget for Galliard"""
+    """The main window's header bar: connect button, search bar, app menu."""
 
     def __init__(self, mpd_conn, window):
+        """Build the header chrome and subscribe to MPD connection events."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
 
         self.mpd_conn = mpd_conn
         self.window = window
 
-        # Create the header bar using Adw
         self.header = Adw.HeaderBar()
         self.append(self.header)
 
-        # Set window title
         self.title_widget = self.create_title_widget()
         self.header.set_title_widget(self.title_widget)
 
-        # Connect button
         self.connect_button = Gtk.Button(
             icon_name="network-server-symbolic", tooltip_text="Connect to MPD server"
         )
         self.connect_button.connect("clicked", self.on_connect_clicked)
         self.header.pack_start(self.connect_button)
 
-        # Search button
         self.search_button = Gtk.ToggleButton(
             icon_name="system-search-symbolic", tooltip_text="Search library"
         )
         self.search_button.connect("toggled", self.on_search_toggled)
         self.header.pack_start(self.search_button)
 
-        # Search bar with dropdown and entry
         self.search_bar = Gtk.SearchBar()
         search_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
-        # Create dropdown for search type with display text and MPD values
         self.search_type_dropdown = Gtk.DropDown()
 
-        # Store search type mappings
+        # Map visible dropdown positions to MPD's search-type keywords.
         self.search_type_map = {
             0: "any",
             1: "title",
@@ -61,15 +55,15 @@ class HeaderBar(Gtk.Box):
         search_types.append("Artist")
         search_types.append("Year")
         self.search_type_dropdown.set_model(search_types)
-        self.search_type_dropdown.set_selected(0)  # Default to "Any"
+        self.search_type_dropdown.set_selected(0)
         search_box.append(self.search_type_dropdown)
 
-        # Create search entry
         self.search_entry = Gtk.SearchEntry()
         self.search_entry.set_hexpand(True)
         self.search_entry.connect("search-changed", self.on_search_changed)
 
-        # Connect focus events to disable/enable space accelerator
+        # While the search entry has focus the space key should type a
+        # literal space rather than trigger the global play/pause accelerator.
         focus_controller = Gtk.EventControllerFocus.new()
         focus_controller.connect("enter", self.on_search_focus_in)
         focus_controller.connect("leave", self.on_search_focus_out)
@@ -81,14 +75,12 @@ class HeaderBar(Gtk.Box):
         self.search_bar.connect_entry(self.search_entry)
         self.append(self.search_bar)
 
-        # Menu button
         self.menu_button = Gtk.MenuButton(
             icon_name="open-menu-symbolic", tooltip_text="Main menu"
         )
         self.create_main_menu()
         self.header.pack_end(self.menu_button)
 
-        # Connect signals
         self.mpd_conn.connect_signal(
             "connecting-blocked", self.on_mpd_connecting_blocked
         )
@@ -99,41 +91,40 @@ class HeaderBar(Gtk.Box):
         )
         self.mpd_conn.connect_signal("disconnected", self.on_mpd_disconnected)
         self.mpd_conn.connect_signal("song-changed", self.on_song_changed)
-        # Store current subtitle for title updates
+
         self.current_subtitle = "Not connected"
 
     def create_title_widget(self):
-        """Create a custom title widget using Adw.WindowTitle"""
+        """Return the Adw.WindowTitle used as the header's centre widget."""
         self.window_title = Adw.WindowTitle(title="Galliard", subtitle="Not connected")
         return self.window_title
 
     def create_main_menu(self):
-        """Create the main menu"""
-        # Create menu model
+        """Build the hamburger-menu model with connection / prefs / quit sections."""
         menu = Gio.Menu()
 
-        # Add connection section
         connection_section = Gio.Menu()
         connection_section.append("Connect", "app.connect")
         connection_section.append("Disconnect", "app.disconnect")
         menu.append_section(None, connection_section)
 
-        # Add preferences and about section
         prefs_section = Gio.Menu()
         prefs_section.append("Preferences", "app.preferences")
         prefs_section.append("About", "app.about")
         menu.append_section(None, prefs_section)
 
-        # Add quit section
         quit_section = Gio.Menu()
         quit_section.append("Quit", "app.quit")
         menu.append_section(None, quit_section)
 
-        # Connect menu to button
         self.menu_button.set_menu_model(menu)
 
     def update_connection_status(self, connected):
-        """Update UI to reflect connection status"""
+        """Reflect the MPD connection state in the title subtitle + connect button.
+
+        ``connected`` is a small enum: 0 connecting-blocked, 1 connecting,
+        2 connected, 3 disconnecting, anything else treated as disconnected.
+        """
         print(f"Updating connection status: {connected}")
         if connected == 0:
             self.set_subtitle("Connecting...")
@@ -164,44 +155,44 @@ class HeaderBar(Gtk.Box):
             self.connect_button.set_sensitive(True)
 
     def set_subtitle(self, text):
-        """Update the subtitle text"""
+        """Set the header subtitle, remembering it for later redisplay."""
         self.current_subtitle = text
         self.window_title.set_subtitle(text)
 
     def on_connect_clicked(self, button):
-        """Handle connect button click"""
+        """Toggle the MPD connection when the header's network button is clicked."""
         if not self.mpd_conn.is_connected():
             self.mpd_conn.connect_to_server()
         else:
             self.mpd_conn.disconnect_from_server()
 
     def on_mpd_connecting_blocked(self, client):
-        """Handle MPD connecting blocked"""
+        """Signal handler: MPD connect is queued behind another operation."""
         print("MPD connecting blocked...")
-        idle_add_once(self.update_connection_status, 0)
+        self.update_connection_status(0)
 
     def on_mpd_connecting(self, client):
-        """Handle MPD connection"""
+        """Signal handler: MPD connection attempt in progress."""
         print("MPD connecting...")
-        idle_add_once(self.update_connection_status, 1)
+        self.update_connection_status(1)
 
     def on_mpd_connected(self, client):
-        """Handle MPD connection"""
+        """Signal handler: MPD connection established."""
         print("MPD connected")
-        idle_add_once(self.update_connection_status, 2)
+        self.update_connection_status(2)
 
     def on_mpd_disconnecting_blocked(self, client):
-        """Handle MPD disconnection blocked"""
+        """Signal handler: MPD disconnect queued behind another operation."""
         print("MPD disconnecting blocked...")
-        idle_add_once(self.update_connection_status, 3)
+        self.update_connection_status(3)
 
     def on_mpd_disconnected(self, client):
-        """Handle MPD disconnection"""
+        """Signal handler: MPD connection closed."""
         print("MPD disconnected")
-        idle_add_once(self.update_connection_status, 4)
+        self.update_connection_status(4)
 
     def on_song_changed(self, client):
-        """Handle song change"""
+        """Signal handler: update the subtitle with the new song's title/artist."""
         if self.mpd_conn.is_connected() and self.mpd_conn.current_song:
             song = self.mpd_conn.current_song
             title = song.get("title", "Unknown")
@@ -209,31 +200,30 @@ class HeaderBar(Gtk.Box):
             self.set_subtitle(f"{title} - {artist}")
 
     def on_search_toggled(self, button):
-        """Handle search button toggle"""
+        """Show or hide the search bar and focus the entry when shown."""
         self.search_bar.set_search_mode(button.get_active())
         if button.get_active():
             self.search_entry.grab_focus()
 
     def on_search_changed(self, entry):
-        """Handle search text changes"""
+        """Propagate search text + selected type to the registered callback."""
         query = entry.get_text()
         selected_index = self.search_type_dropdown.get_selected()
         search_type = self.search_type_map[selected_index]
 
-        # Emit signal that search has changed
         if hasattr(self, "search_changed_callback"):
             self.search_changed_callback(query, search_type)
 
     def on_search_focus_in(self, controller):
-        """Handle search entry gaining focus"""
+        """Disable the space-bar play/pause shortcut while typing in search."""
         logging.debug("Search entry focused in")
         self.window.remove_space_accel()
 
     def on_search_focus_out(self, controller):
-        """Handle search entry losing focus"""
+        """Restore the space-bar play/pause shortcut when search loses focus."""
         logging.debug("Search entry focused out")
         self.window.restore_space_accel()
 
     def set_search_changed_callback(self, callback):
-        """Set callback for search changes"""
+        """Register ``callback(query, search_type)`` fired on search input."""
         self.search_changed_callback = callback

@@ -4,26 +4,19 @@ import unicodedata
 
 
 def get_sort_key(text, ignore_prefixes=True):
-    """
-    Generate a sort key for text that ignores common prefixes, is case-insensitive,
-    and converts European non-English letters to their ASCII equivalents.
+    """Return a normalised sort key for ``text``.
 
-    Args:
-        text (str): The text to generate a sort key for
-        ignore_prefixes (bool): Whether to ignore common prefixes like "The", "A", "An"
-
-    Returns:
-        A normalized string for sorting
+    Lower-cased and unicode-folded (so ``é``/``ö``/``ø`` sort next to their
+    ASCII counterparts). When ``ignore_prefixes`` is set, leading ``the``,
+    ``a``, ``an`` are stripped so "The Beatles" sorts under B.
     """
     if not text:
         return ""
 
-    # Convert to lowercase
     text = text.lower()
 
-    # Normalize unicode characters to ASCII equivalents
-    # This converts letters like é->e, ñ->n, ö->o, etc.
-    # Ensure it works for Ø too
+    # Decompose accented characters and drop the combining marks so
+    # diacritics don't split letters across sort buckets.
     text = unicodedata.normalize("NFKC", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
     text = text.replace("ø", "o")

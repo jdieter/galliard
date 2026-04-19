@@ -45,8 +45,23 @@ class Song(GObject.GObject):
         for i in data:
             setattr(self, i, data[i])
 
+    def get(self, key, default=None):
+        """Return the named field, unwrapping list-valued MPD tags.
+
+        MPD returns fields like ``artist`` when multiple values are set as
+        a list; this returns the first element so callers don't have to
+        special-case that.
+        """
+        value = getattr(self, key, None)
+        if isinstance(value, list):
+            return value[0] if value else default
+        if value is None:
+            return default
+        return value
+
     def get_title(self):
-        return getattr(self, "title", getattr(self, "file", "Unknown"))
+        """Return the song's title, falling back to the file path."""
+        return self.get("title") or self.get("file", "Unknown")
 
 
 class FileItem(GObject.GObject):

@@ -10,13 +10,13 @@ class Config:
     """Configuration manager for Galliard"""
 
     def __init__(self):
-        """Initialize the configuration manager"""
+        """Prepare config paths and seed in-memory settings with defaults."""
         self.config_dir = Path(xdg_config_home) / "galliard"
         self.config_file = self.config_dir / "config.json"
         self.config = self.get_default_config()
 
     def get_default_config(self):
-        """Get default configuration"""
+        """Return the built-in defaults merged into on first run."""
         return {
             "mpd": {
                 "host": "localhost",
@@ -33,11 +33,9 @@ class Config:
         }
 
     def load(self):
-        """Load configuration from file"""
-        # Create config directory if it doesn't exist
+        """Load configuration from disk, creating the file on first run."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-        # Load config file if it exists
         if self.config_file.exists():
             try:
                 with open(self.config_file, "r") as f:
@@ -46,15 +44,12 @@ class Config:
             except Exception as e:
                 logging.error(f"Error loading config file: {e}")
         else:
-            # Create default config file
             self.save()
 
     def save(self):
-        """Save configuration to file"""
-        # Create config directory if it doesn't exist
+        """Write the current in-memory config back to disk."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save config to file
         try:
             with open(self.config_file, "w") as f:
                 json.dump(self.config, f, indent=4)
@@ -62,8 +57,7 @@ class Config:
             print(f"Error saving config file: {e}")
 
     def get(self, key, default=None):
-        """Get a configuration value"""
-        # Handle nested keys with dot notation
+        """Look up ``key`` (supports ``a.b.c`` dotted paths)."""
         if "." in key:
             parts = key.split(".")
             value = self.config
@@ -74,12 +68,10 @@ class Config:
                     return default
             return value
 
-        # Handle simple keys
         return self.config.get(key, default)
 
     def set(self, key, value):
-        """Set a configuration value"""
-        # Handle nested keys with dot notation
+        """Set ``key`` (supports dotted paths, creating intermediate dicts)."""
         if "." in key:
             parts = key.split(".")
             config = self.config
@@ -89,8 +81,6 @@ class Config:
                 config = config[part]
             config[parts[-1]] = value
         else:
-            # Handle simple keys
             self.config[key] = value
 
-        # Save changes
         self.save()

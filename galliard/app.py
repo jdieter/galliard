@@ -15,7 +15,8 @@ from galliard.notifications import NotificationManager  # noqa: E402
 
 logging.basicConfig(level=logging.DEBUG)
 
-# Try to import system tray support
+# System tray and media-keys bindings are both optional; the app runs
+# without either if the system libraries aren't available.
 try:
     from galliard.system_tray import (
         SystemTrayIcon,
@@ -25,7 +26,6 @@ except ImportError:
     SystemTrayIcon = None
     APPINDICATOR_AVAILABLE = False
 
-# Try to import media keys support
 try:
     from galliard.media_keys import MediaKeysManager, MEDIA_KEYS_AVAILABLE  # noqa: E402
 except ImportError:
@@ -34,34 +34,30 @@ except ImportError:
 
 
 class Galliard(Adw.Application):
-    """Main application class for Galliard"""
+    """Top-level Adw.Application for the Galliard MPD client."""
 
     def __init__(self):
+        """Construct the application, load config, and wire up signals."""
         super().__init__(
             application_id="net.jdieter.galliard", flags=Gio.ApplicationFlags.FLAGS_NONE
         )
 
-        # Load configuration
         self.config = Config()
         self.config.load()
 
-        # Initialize MPD client
         self.mpd_conn = MPDConn(self.config)
 
-        # Initialize notification manager, system tray icon and media keys
         self.notification_manager = None
         self.system_tray_icon = None
         self.media_keys_manager = None
 
-        # Connect signals
         self.connect("activate", self.on_activate)
         self.connect("shutdown", self.on_shutdown)
 
-        # Set up actions
         self.create_actions()
 
     def create_actions(self):
-        """Create application actions"""
+        """Register app-level Gio actions and their keyboard accelerators."""
         actions = [
             ("quit", self.on_quit),
             ("preferences", self.on_preferences),
@@ -75,18 +71,18 @@ class Galliard(Adw.Application):
             action.connect("activate", callback)
             self.add_action(action)
 
-        # Add keyboard shortcuts
         self.set_accels_for_action("app.quit", ["<primary>q"])
         self.set_accels_for_action("app.preferences", ["<primary>comma"])
 
     def on_activate(self, app):
-        """Handle application activation"""
-        # Initialize notification manager and system tray
+        """Initialise singleton services, present the window, and auto-connect."""
         if not self.notification_manager:
             self.notification_manager = NotificationManager(
                 self, self.config, self.mpd_conn
             )
 
+        # Only build the tray icon when there's actually a backend for it --
+        # otherwise on_close_request would minimise to an invisible tray.
         if (
             SystemTrayIcon
             and APPINDICATOR_AVAILABLE
@@ -95,55 +91,44 @@ class Galliard(Adw.Application):
         ):
             self.system_tray_icon = SystemTrayIcon(self, self.config, self.mpd_conn)
 
-        # Initialize media keys support
         if MediaKeysManager and not self.media_keys_manager:
             self.media_keys_manager = MediaKeysManager(self, self.mpd_conn)
 
-        # Get the active window or create one if necessary
         window = self.props.active_window
         if window is None:
             window = MainWindow(application=self, mpd_conn=self.mpd_conn)
-
-        # Present the window to the user
         window.present()
 
-        # Auto-connect to MPD server if configured
         if self.config.get("auto_connect", True):
             self.mpd_conn.connect_to_server()
 
     def on_shutdown(self, app):
-        """Handle application shutdown"""
-        # Disconnect from MPD
+        """Tear down MPD connection and release external integrations."""
         if self.mpd_conn.is_connected():
             self.disconnect_mpd()
 
-        # Clean up notification manager
         if self.notification_manager:
             self.notification_manager.cleanup()
-
-        # Clean up system tray icon
         if self.system_tray_icon:
             self.system_tray_icon.cleanup()
-
-        # Clean up media keys
         if self.media_keys_manager:
             self.media_keys_manager.release()
 
     def do_activate(self):
-        """Default activation handler (called before on_activate)"""
-        pass  # We use the on_activate handler instead
+        """No-op; activation is handled via the ``activate`` signal."""
+        pass
 
     def on_quit(self, action, param):
-        """Quit the application"""
+        """Quit the application."""
         self.quit()
 
     def on_preferences(self, action, param):
-        """Show preferences dialog"""
+        """Open the preferences window."""
         prefs = PreferencesWindow(self, self.config)
         prefs.present()
 
     def on_about(self, action, param):
-        """Show about dialog"""
+        """Open the about dialog."""
         about = Adw.AboutWindow(
             transient_for=self.props.active_window,
             application_name="Galliard",
@@ -159,13 +144,13 @@ class Galliard(Adw.Application):
         about.present()
 
     def on_connect(self, action, param):
-        """Connect to MPD server"""
+        """Action handler: connect to the configured MPD server."""
         self.mpd_conn.connect_to_server()
 
     def on_disconnect(self, action, param):
-        """Disconnect from MPD server"""
+        """Action handler: disconnect from the MPD server."""
         self.disconnect_mpd()
 
     def disconnect_mpd(self):
-        """Safely disconnect from MPD server with proper asyncio handling"""
+        """Disconnect from the MPD server."""
         self.mpd_conn.disconnect_from_server()

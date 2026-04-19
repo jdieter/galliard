@@ -5,15 +5,15 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib, Pango  # noqa: E402
 
-from galliard.utils.album_art import load_album_art  # noqa: E402
-from galliard.widgets.async_ui_helper import AsyncUIHelper  # noqa: E402
-from galliard.utils.glib import idle_add_once  # noqa: E402
+from galliard.utils.album_art import bind_art_to_widget  # noqa: E402
+from galliard.utils.async_task_queue import AsyncUIHelper  # noqa: E402
 
 
 class PlayerControls(Gtk.Box):
-    """Player controls widget for Galliard"""
+    """Always-visible playback strip: art, song info, transport, volume."""
 
     def __init__(self, mpd_client):
+        """Build the controls, subscribe to MPD signals, and wire up teardown."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("player-controls")
 
@@ -21,14 +21,12 @@ class PlayerControls(Gtk.Box):
         self._volume_timeout_id = None
         self._progress_timer_id = None
 
-        # Create UI
         self.create_ui()
 
         # Stop the progress timer when the widget is torn down so the
         # callback can't fire against destroyed widgets.
         self.connect("unrealize", self._on_unrealize)
 
-        # Connect signals
         self.mpd_client.connect_signal("disconnecting-blocked", self.reset_controls)
         self.mpd_client.connect_signal("disconnected", self.reset_controls)
         self.mpd_client.connect_signal("connecting-blocked", self.reset_controls)
@@ -42,8 +40,7 @@ class PlayerControls(Gtk.Box):
         self.mpd_client.connect_signal("random-changed", self.on_random_changed)
 
     def create_ui(self):
-        """Create the user interface"""
-        # Main container with clamp for better spacing
+        """Build the horizontal strip: art | song info | progress | controls | volume."""
         self.main_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=6,
@@ -54,26 +51,17 @@ class PlayerControls(Gtk.Box):
         )
         self.append(self.main_box)
 
-        # Album art
         self.album_image = Gtk.Picture()
         self.album_image.set_size_request(50, 50)
         self.album_image.set_content_fit(Gtk.ContentFit.COVER)
         self.album_image.add_css_class("rounded")
         self.main_box.append(self.album_image)
 
-        # Song information section
         self.create_song_info_section()
-
-        # Create progress section
         self.create_progress_section()
-
-        # Control buttons section
         self.create_control_buttons()
-
-        # Volume control section
         self.create_volume_control()
 
-        # Add a separator
         self.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
         # Add CSS for error message styling
@@ -515,19 +503,17 @@ class PlayerControls(Gtk.Box):
 
     def on_mpd_connected(self, client):
         """Handle MPD connection"""
-        idle_add_once(self.clear_connection_error)
-        idle_add_once(self.update_controls_sensitivity, True)
+        self.clear_connection_error()
+        self.update_controls_sensitivity(True)
 
-        # Update UI with current state
         if self.mpd_client.current_song:
-            idle_add_once(self.on_song_changed, client)
+            self.on_song_changed(client)
 
-        # Update volume control
         if "volume" in self.mpd_client.status:
             try:
                 volume = int(self.mpd_client.status["volume"])
-                idle_add_once(self.volume_scale.set_value, volume)
-                idle_add_once(self.update_volume_lines, volume)
+                self.volume_scale.set_value(volume)
+                self.update_volume_lines(volume)
             except (ValueError, TypeError):
                 pass
 
@@ -590,21 +576,10 @@ class PlayerControls(Gtk.Box):
             self.album_prefix.set_text("")
             self.song_album_label.set_text("")
 
-        # Use AsyncUIHelper to load album art asynchronously
-        AsyncUIHelper.run_async_operation(
-            lambda: load_album_art(self.mpd_client, song, self.album_image, 50),
-            None,  # No callback needed as load_album_art handles UI updates
-        )
+        bind_art_to_widget(self.mpd_client, self.album_image, song, 50)
 
     def on_repeat_changed(self, client, repeat, single):
-        """
-        Handle repeat mode change
-
-        Args:
-            client: The MPD client that emitted the signal
-            repeat (int): 1 if repeat is enabled, 0 otherwise
-            single (int): 1 if single song repeat is enabled, 0 otherwise
-        """
+        """Update the repeat button icon to match MPD's ``repeat`` + ``single`` state."""
         if not hasattr(self, "repeat_button"):
             return
 
@@ -619,13 +594,7 @@ class PlayerControls(Gtk.Box):
             self.repeat_button.remove_css_class("enabled-mode")
 
     def on_random_changed(self, client, random):
-        """
-        Handle random (shuffle) mode change
-
-        Args:
-            client: The MPD client that emitted the signal
-            random (int): 1 if random is enabled, 0 otherwise
-        """
+        """Update the shuffle button icon to match MPD's ``random`` state."""
         if not hasattr(self, "random_button"):
             return
 
@@ -645,11 +614,7 @@ class PlayerControls(Gtk.Box):
         self.album_prefix.set_text("")
         self.song_album_label.set_text("")
 
-        # Reset album art asynchronously
-        AsyncUIHelper.run_async_operation(
-            lambda: load_album_art(self.mpd_client, None, self.album_image, 50),
-            None,  # No callback needed
-        )
+        bind_art_to_widget(self.mpd_client, self.album_image, None, 50)
 
         # Reset progress bar and time labels
         self.progress_bar.set_value(0)
@@ -737,61 +702,40 @@ class PlayerControls(Gtk.Box):
         return True  # Continue timer
 
     def on_volume_changed(self, client, volume):
-        """
-        Handle volume change from MPD
-
-        Args:
-            client: The MPD client that emitted the signal
-            volume (int): The new volume level (0-100)
-        """
+        """Update the scale + LED display to match MPD's reported volume."""
         try:
             volume = int(volume)
-            idle_add_once(self.volume_scale.set_value, volume)
-            idle_add_once(self.update_volume_lines, volume)
+            self.volume_scale.set_value(volume)
+            self.update_volume_lines(volume)
         except (ValueError, TypeError):
             pass
 
     def update_volume_lines(self, volume):
-        """
-        Update the volume line indicators based on current volume level
-
-        Args:
-            volume (int): Volume level between 0-100
-        """
+        """Redraw the LED-bar volume indicator for a 0-100 ``volume``."""
         if not hasattr(self, "volume_lines"):
             return
 
-        # Calculate which lines should be active
         total_lines = len(self.volume_lines)
         active_lines = int(round((volume / 100.0) * total_lines))
 
-        # Update each line's appearance
         for i, line in enumerate(self.volume_lines):
             if self.mpd_client.is_connected():
                 if i < active_lines:
-                    # Active line
                     line.remove_css_class("volume-line-inactive")
                     line.remove_css_class("volume-line-disabled")
                     line.add_css_class("volume-line")
                 else:
-                    # Inactive but enabled line
                     line.remove_css_class("volume-line")
                     line.remove_css_class("volume-line-disabled")
                     line.add_css_class("volume-line-inactive")
             else:
-                # Disabled line (when disconnected)
+                # Grey out every segment when MPD is unreachable.
                 line.remove_css_class("volume-line")
                 line.remove_css_class("volume-line-inactive")
                 line.add_css_class("volume-line-disabled")
 
     def on_elapsed_changed(self, client, elapsed):
-        """
-        Handle elapsed time changes from MPD
-
-        Args:
-            client: The MPD client that emitted the signal
-            elapsed (float): The elapsed time in seconds
-        """
+        """Redraw the progress bar and time labels for a new elapsed time."""
         if not self.mpd_client.is_connected() or not self.mpd_client.current_song:
             return
 
@@ -800,11 +744,9 @@ class PlayerControls(Gtk.Box):
             total = float(self.mpd_client.current_song.get("time", 0))
 
             if total > 0:
-                # Update progress bar
                 percent = (elapsed / total) * 100
                 self.progress_bar.set_value(percent)
 
-                # Update time labels
                 elapsed_str = self.format_time(elapsed)
                 total_str = self.format_time(total)
                 self.elapsed_label.set_text(elapsed_str)

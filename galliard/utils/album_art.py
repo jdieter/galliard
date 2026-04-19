@@ -5,48 +5,61 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GdkPixbuf, Gdk, Gtk  # noqa: E402
 
+from galliard.models import Song  # noqa: E402
+from galliard.utils.async_task_queue import AsyncUIHelper  # noqa: E402
+
 _album_art_cache = OrderedDict()
 _MAX_CACHE_SIZE = 2000  # Max number of cached album arts
 
-async def get_album_art_as_pixbuf(mpd_conn, audio_file, size):
-    """
-    Get album art for a song and return it as a GdkPixbuf.Pixbuf
+_rounded_css_installed = False
 
-    Args:
-        mpd_conn: The MPD client instance
-        audio_file: Path to the audio file
-        size: Desired size for the album art
+
+def _ensure_rounded_css(radius=8):
+    """Install the ``.rounded`` border-radius provider on the default display, once."""
+    global _rounded_css_installed
+    if _rounded_css_installed:
+        return
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    provider = Gtk.CssProvider()
+    provider.load_from_data(f".rounded {{ border-radius: {radius}px; }}".encode())
+    Gtk.StyleContext.add_provider_for_display(
+        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+    _rounded_css_installed = True
+
+
+async def get_album_art_as_pixbuf(mpd_conn, audio_file, size):
+    """Return a ``GdkPixbuf.Pixbuf`` of ``audio_file``'s art, scaled to ``size``.
+
+    Hits a process-wide LRU cache keyed by ``(image_path, size)`` before
+    fetching from MPD. The aspect ratio is preserved; ``size`` bounds the
+    longer edge.
     """
     if not mpd_conn.is_connected() or not audio_file:
         return None
 
-    # Check cache first
     cache_location = mpd_conn.image_cache.get_image_path(audio_file)
     logging.debug(f"Cache location for {audio_file}: {cache_location}")
     if cache_location:
         cache_key = (cache_location, size)
         if cache_key in _album_art_cache:
-            # Move to end (most recently used)
             _album_art_cache.move_to_end(cache_key)
             logging.debug(f"Album art cache hit for {audio_file} at size {size}")
             return _album_art_cache[cache_key]
 
     try:
-        # Get album art data from MPD - await the async call
         binary_data, _, key = await mpd_conn.async_get_album_art(audio_file)
         logging.debug(f"Album art data length: {len(binary_data) if binary_data else 'None'}")
         if binary_data:
-            # Create a PixbufLoader and load the image data directly
             loader = GdkPixbuf.PixbufLoader.new()
-
-            # Write the binary data to the loader
             loader.write(binary_data)
             loader.close()
 
-            # Get the pixbuf and scale it if necessary
             pixbuf = loader.get_pixbuf()
             if pixbuf:
-                # Scale preserving aspect ratio
+                # Scale so the longer edge is exactly `size`.
                 width = pixbuf.get_width()
                 height = pixbuf.get_height()
                 if width > height:
@@ -61,11 +74,10 @@ async def get_album_art_as_pixbuf(mpd_conn, audio_file, size):
                 )
 
                 cache_key = (key, size)
-                # Store in cache
                 _album_art_cache[cache_key] = scaled_pixbuf
                 _album_art_cache.move_to_end(cache_key)
 
-                # Enforce cache size limit (remove oldest entry)
+                # LRU eviction when the cache outgrows the cap.
                 if len(_album_art_cache) > _MAX_CACHE_SIZE:
                     _album_art_cache.popitem(last=False)
 
@@ -78,18 +90,10 @@ async def get_album_art_as_pixbuf(mpd_conn, audio_file, size):
 
 
 def apply_rounded_corners_to_picture(picture, radius=5):
-    """
-    Apply rounded corners to a Gtk.Picture widget using GTK4's overlay approach
-
-    Args:
-        picture: The Gtk.Picture widget
-        radius: Corner radius in pixels
-    """
-    # Set up the style classes for rounded corners
+    """Clip ``picture`` to a rounded rectangle via CSS + overflow hidden."""
     picture.set_overflow(Gtk.Overflow.HIDDEN)
     picture.add_css_class("rounded")
 
-    # Apply CSS for rounded corners
     css_provider = Gtk.CssProvider()
     css = f"""
     .rounded {{
@@ -98,7 +102,6 @@ def apply_rounded_corners_to_picture(picture, radius=5):
     """
     css_provider.load_from_data(css.encode())
 
-    # Apply the CSS to the widget
     if display := Gdk.Display.get_default():
         Gtk.StyleContext.add_provider_for_display(
             display, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
@@ -106,15 +109,7 @@ def apply_rounded_corners_to_picture(picture, radius=5):
 
 
 def get_default_icon_paintable(size):
-    """
-    Get the default icon paintable for missing album art
-
-    Args:
-        size: Desired size for the icon
-
-    Returns:
-        A Gtk.IconPaintable object
-    """
+    """Return a ``Gtk.IconPaintable`` for the fallback ``audio-x-generic-symbolic`` icon."""
     if display := Gdk.Display.get_default():
         return Gtk.IconTheme.get_for_display(display).lookup_icon(
             "audio-x-generic-symbolic",
@@ -129,19 +124,15 @@ def get_default_icon_paintable(size):
 
 
 def set_widget_album_art(image_widget, art_source, size=100, radius=8):
-    """
-    Set album art to a widget, handling different widget types
+    """Put ``art_source`` (or the fallback icon) on a Gtk.Picture or Gtk.Image.
 
-    Args:
-        image_widget: Gtk.Picture or Gtk.Image widget
-        art_source: Either a GdkPixbuf.Pixbuf or None for default icon
-        size: Desired size for the art
-        radius: Corner radius for Gtk.Picture widgets
+    Also sizes the widget: ``set_size_request(size, size)`` for Pictures and
+    ``set_pixel_size(size)`` for Images. Callers that manage widget size
+    themselves should use :func:`bind_art_to_widget` instead.
     """
     is_picture = isinstance(image_widget, Gtk.Picture)
 
     if is_picture:
-        # Configure Picture widget
         image_widget.set_size_request(size, size)
         apply_rounded_corners_to_picture(image_widget, radius=radius)
 
@@ -150,7 +141,6 @@ def set_widget_album_art(image_widget, art_source, size=100, radius=8):
         else:
             image_widget.set_paintable(get_default_icon_paintable(size))
     else:
-        # Configure Image widget
         if art_source:
             image_widget.set_from_pixbuf(art_source)
         else:
@@ -160,60 +150,128 @@ def set_widget_album_art(image_widget, art_source, size=100, radius=8):
 
 
 async def create_overlay_for_album_art(mpd_conn, song, size=100):
-    """
-    Create an overlay with rounded corners for album art
-
-    Args:
-        mpd_conn: The MPD client instance
-        song: Dictionary containing song information
-        size: Desired size for the album art
-
-    Returns:
-        An overlay widget containing the album art with rounded corners
-    """
+    """Build a rounded-corner Gtk.Overlay containing ``song``'s album art."""
     overlay = Gtk.Overlay()
     picture = Gtk.Picture()
 
-    # Get album art if available
     scaled_pixbuf = None
     if song and mpd_conn.is_connected():
         scaled_pixbuf = await get_album_art_as_pixbuf(
             mpd_conn, song.get("file"), size
         )
 
-    # Set the album art to the picture
     set_widget_album_art(picture, scaled_pixbuf, size, radius=8)
     overlay.set_child(picture)
 
     return overlay
 
 
-async def load_album_art(mpd_conn, song, image_widget=None, size=100):
-    """
-    Load album art for a song and set it to a Gtk.Image or Gtk.Picture widget
+def _file_from(song_or_path):
+    """Coerce a :class:`Song` or raw path string to the MPD file URI."""
+    if isinstance(song_or_path, Song):
+        return song_or_path.file
+    return song_or_path
 
-    Args:
-        mpd_conn: The MPD client instance
-        song: Dictionary containing song information
-        image_widget: Gtk.Picture or Gtk.Image widget to display the album art
-        size: Desired size for the album art
+
+def fetch_art_async(
+    mpd_conn,
+    song_or_path,
+    size,
+    on_result,
+    *,
+    task_id=None,
+    task_priority=110,
+):
+    """Queue an async album-art fetch for ``song_or_path``.
+
+    ``on_result(pixbuf_or_None)`` fires on the GLib main loop once the
+    fetch completes. ``task_id`` / ``task_priority`` are forwarded to
+    :class:`AsyncUIHelper` for cancellation and scheduling.
     """
-    if not image_widget:
+    audio_file = _file_from(song_or_path)
+    if audio_file is None:
+        on_result(None)
         return
 
-    # Set default icon initially
-    set_widget_album_art(image_widget, None, size, radius=8)
+    async def _fetch():
+        return await get_album_art_as_pixbuf(mpd_conn, audio_file, size)
 
-    # Don't try to load album art if no MPD connection or no song
-    if not mpd_conn.is_connected() or not song:
-        # Ensure we use the default icon when song is None
+    AsyncUIHelper.run_async_operation(
+        _fetch,
+        on_result,
+        task_id=task_id,
+        task_priority=task_priority,
+    )
+
+
+def _put_art(widget, pixbuf):
+    """Set ``pixbuf`` (or the fallback icon) on ``widget`` without resizing it.
+
+    Unlike :func:`set_widget_album_art`, this preserves the widget's
+    caller-chosen geometry so the ``fetch_size`` used to request MPD's art
+    can differ from the widget's displayed size.
+    """
+    if isinstance(widget, Gtk.Picture):
+        # A plain Gtk.Picture doesn't clip its paintable; install the
+        # .rounded class + overflow once per widget so the texture gets
+        # rounded corners to match the placeholder icon paintable.
+        if not getattr(widget, "_rounded_configured", False):
+            _ensure_rounded_css()
+            widget.set_overflow(Gtk.Overflow.HIDDEN)
+            widget.add_css_class("rounded")
+            widget._rounded_configured = True
+        if pixbuf is not None:
+            widget.set_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))
+        else:
+            widget.set_paintable(None)
+    else:
+        if pixbuf is not None:
+            widget.set_from_pixbuf(pixbuf)
+        else:
+            widget.set_from_icon_name("audio-x-generic-symbolic")
+
+
+def bind_art_to_widget(
+    mpd_conn,
+    widget,
+    song_or_path,
+    fetch_size,
+    *,
+    task_id=None,
+    task_priority=110,
+):
+    """Async-load the album art for ``song_or_path`` onto ``widget``.
+
+    ``fetch_size`` is the pixel resolution requested from MPD (also the
+    cache key). The widget's display size stays whatever the caller
+    configured with ``set_pixel_size`` / ``set_size_request`` -- this
+    helper doesn't touch geometry.
+
+    Dedupes per-widget: if ``widget`` already shows art for this file,
+    the call is a no-op. A ``None`` song renders the default icon.
+    """
+    audio_file = _file_from(song_or_path)
+
+    if audio_file is not None and getattr(widget, "_loaded_art_file", None) == audio_file:
         return
+    widget._loaded_art_file = audio_file
 
-    # Get album art data from MPD and apply it
-    try:
-        scaled_pixbuf = await get_album_art_as_pixbuf(mpd_conn, song["file"], size)
-        if scaled_pixbuf:
-            set_widget_album_art(image_widget, scaled_pixbuf, size, radius=8)
-    except Exception as e:
-        print(f"Failed to load album art: {e}")
-        # Default icon already set, no need to do anything here
+    async def _load_and_set():
+        if audio_file is None or not mpd_conn.is_connected():
+            _put_art(widget, None)
+            widget.pixbuf_data = None
+            return
+        pixbuf = await get_album_art_as_pixbuf(mpd_conn, audio_file, fetch_size)
+        # Another bind may have taken over this widget in the meantime;
+        # don't stomp on it with our stale result.
+        if getattr(widget, "_loaded_art_file", None) != audio_file:
+            return
+        _put_art(widget, pixbuf)
+        widget.pixbuf_data = pixbuf
+
+    AsyncUIHelper.run_async_operation(
+        _load_and_set,
+        None,
+        task_id=task_id,
+        task_priority=task_priority,
+    )
