@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import logging
+
 import gi
 
 from gi.repository import GObject
@@ -37,7 +39,7 @@ class MediaKeysManager(GObject.Object):
                 "media-player-key-pressed", self.on_media_key_pressed
             )
         except Exception as e:
-            print(f"Failed to set up media keys: {e}")
+            logging.error("Failed to set up media keys: %s", e)
 
     def on_media_key_pressed(self, proxy, application, key):
         """Route a media-key press to the equivalent MPD command."""

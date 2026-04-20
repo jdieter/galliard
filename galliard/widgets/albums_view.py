@@ -1,3 +1,5 @@
+import logging
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -104,7 +106,7 @@ class AlbumsView(Gtk.ScrolledWindow):
                     self.mpd_client, songs[0].file, 48
                 )
         except Exception as e:
-            print(f"Error loading album art: {e}")
+            logging.error("Error loading album art: %s", e)
         return None
 
     def _update_album_art(self, list_item, pixbuf):
@@ -144,7 +146,7 @@ class AlbumsView(Gtk.ScrolledWindow):
             )
             await self.mpd_client.async_play(0)
         except Exception as e:
-            print(f"Error playing album songs: {e}")
+            logging.error("Error playing album songs: %s", e)
 
     async def load_albums(self):
         """Refresh ``self.albums_store`` from MPD, sorted case/accent-insensitively."""

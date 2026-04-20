@@ -1,3 +1,5 @@
+import logging
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -242,7 +244,7 @@ class FilesView(Gtk.ScrolledWindow):
                     items.append(file_item)
 
         except Exception as e:
-            print(f"Error loading directory {directory}: {e}")
+            logging.error("Error loading directory %s: %s", directory, e)
             # Surface the error as a row so the UI isn't silently empty.
             items.append(
                 FileItem(
@@ -275,9 +277,9 @@ class FilesView(Gtk.ScrolledWindow):
                         self.mpd_client, audio_file, 200
                     )
                 except Exception as e:
-                    print(f"Error getting album art for {audio_file}: {e}")
+                    logging.error("Error getting album art for %s: %s", audio_file, e)
         except Exception as e:
-            print(f"Error loading art for directory {dir_path}: {e}")
+            logging.error("Error loading art for directory %s: %s", dir_path, e)
 
         return None
 
@@ -331,17 +333,17 @@ class FilesView(Gtk.ScrolledWindow):
 
     async def load_root_directory(self):
         """Populate ``self.files_store`` with the MPD library root."""
-        print("Loading root directory...")
+        logging.debug("Loading root directory...")
 
         if not self.mpd_client.is_connected():
-            print("MPD client not connected")
+            logging.debug("MPD client not connected")
             return False
 
         try:
             self.files_store.remove_all()
 
             items = await self.load_directory_contents("")
-            print(f"Loaded {len(items)} items from root directory")
+            logging.debug("Loaded %d items from root directory", len(items))
 
             for item in items:
                 self.files_store.append(item)
@@ -349,7 +351,7 @@ class FilesView(Gtk.ScrolledWindow):
             idle_add_once(self.files_tree.queue_draw)
 
         except Exception as e:
-            print(f"Error loading root directory: {e}")
+            logging.error("Error loading root directory: %s", e)
 
         return False
 
@@ -458,7 +460,7 @@ class FilesView(Gtk.ScrolledWindow):
             if replace:
                 await self.mpd_client.async_play(0)
         except Exception as e:
-            print(f"Error adding to playlist {file_item.path}: {e}")
+            logging.error("Error adding to playlist %s: %s", file_item.path, e)
 
     async def _add_directory_to_playlist(self, directory_path):
         """Return every music file path under ``directory_path``, recursing subdirs first."""

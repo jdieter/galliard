@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import logging
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -697,7 +699,7 @@ class PlayerControls(Gtk.Box):
 
         except (ValueError, TypeError, KeyError) as e:
             # Handle any errors gracefully
-            print(f"Error updating progress: {e}")
+            logging.error("Error updating progress: %s", e)
 
         return True  # Continue timer
 

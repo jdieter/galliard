@@ -125,7 +125,7 @@ class HeaderBar(Gtk.Box):
         ``connected`` is a small enum: 0 connecting-blocked, 1 connecting,
         2 connected, 3 disconnecting, anything else treated as disconnected.
         """
-        print(f"Updating connection status: {connected}")
+        logging.debug("Updating connection status: %s", connected)
         if connected == 0:
             self.set_subtitle("Connecting...")
             self.connect_button.set_icon_name("network-wireless-acquiring-symbolic")
@@ -168,27 +168,27 @@ class HeaderBar(Gtk.Box):
 
     def on_mpd_connecting_blocked(self, client):
         """Signal handler: MPD connect is queued behind another operation."""
-        print("MPD connecting blocked...")
+        logging.debug("MPD connecting blocked...")
         self.update_connection_status(0)
 
     def on_mpd_connecting(self, client):
         """Signal handler: MPD connection attempt in progress."""
-        print("MPD connecting...")
+        logging.debug("MPD connecting...")
         self.update_connection_status(1)
 
     def on_mpd_connected(self, client):
         """Signal handler: MPD connection established."""
-        print("MPD connected")
+        logging.info("MPD connected")
         self.update_connection_status(2)
 
     def on_mpd_disconnecting_blocked(self, client):
         """Signal handler: MPD disconnect queued behind another operation."""
-        print("MPD disconnecting blocked...")
+        logging.debug("MPD disconnecting blocked...")
         self.update_connection_status(3)
 
     def on_mpd_disconnected(self, client):
         """Signal handler: MPD connection closed."""
-        print("MPD disconnected")
+        logging.info("MPD disconnected")
         self.update_connection_status(4)
 
     def on_song_changed(self, client):

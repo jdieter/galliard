@@ -43,7 +43,7 @@ async def process_queue():
                     cb(r)
                 idle_add_once(call_callback)
         except Exception as e:
-            print(f"Error in async operation: {e}")
+            logging.error("Error in async operation: %s", e)
             if callback:
                 def call_callback_error(cb=callback):
                     cb(None)
@@ -74,7 +74,7 @@ class AsyncUIHelper:
                 try:
                     return await func(self, *args, **kwargs)
                 except Exception as e:
-                    print(f"Error in async operation: {e}")
+                    logging.error("Error in async operation: %s", e)
                     return None
 
             return asyncio.create_task(wrapped_func())

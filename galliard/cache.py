@@ -123,7 +123,7 @@ class ImageCache:
 
             return image_data, mime_type, str(image_path)
         except (OSError, IOError) as e:
-            print(f"Error reading cached image: {e}")
+            logging.error("Error reading cached image: %s", e)
             return None
 
     def put(self, song_uri: str, image_data: bytes, mime_type: str) -> Optional[str]:
@@ -148,7 +148,7 @@ class ImageCache:
 
             return str(image_path)
         except (OSError, IOError) as e:
-            print(f"Error caching image: {e}")
+            logging.error("Error caching image: %s", e)
             return None
 
     def clear(self) -> None:
@@ -160,7 +160,7 @@ class ImageCache:
                 self.cache_dir.mkdir(parents=True, exist_ok=True)
                 self.images_dir.mkdir(parents=True, exist_ok=True)
         except (OSError, IOError) as e:
-            print(f"Error clearing cache: {e}")
+            logging.error("Error clearing cache: %s", e)
 
     def get_cache_size(self) -> int:
         """Return the total size of cached images in bytes."""
@@ -170,5 +170,5 @@ class ImageCache:
                 if file_path.is_file():
                     total_size += file_path.stat().st_size
         except (OSError, IOError) as e:
-            print(f"Error calculating cache size: {e}")
+            logging.error("Error calculating cache size: %s", e)
         return total_size

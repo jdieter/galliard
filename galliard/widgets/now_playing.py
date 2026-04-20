@@ -212,7 +212,6 @@ class NowPlayingView(Gtk.Box):
             return
 
         song = self.mpd_client.current_song
-        print(song)  # Debugging output
 
         self.title_label.set_text(song.get("title", song.get("file", "Unknown")))
         self.artist_label.set_text(song.get("artist", "Unknown Artist"))

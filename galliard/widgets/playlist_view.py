@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import logging
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -338,7 +340,7 @@ class PlaylistView(Gtk.Box):
             self.clear_playlist_view()
             return
 
-        print("Refreshing playlist...")
+        logging.debug("Refreshing playlist...")
         # Get current playlist using async method
         new_playlist = await self.mpd_client.async_get_current_playlist()
         current_song_id = None

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import logging
+import os
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -13,7 +15,16 @@ from galliard.preferences import PreferencesWindow  # noqa: E402
 from galliard.window import MainWindow  # noqa: E402
 from galliard.notifications import NotificationManager  # noqa: E402
 
-logging.basicConfig(level=logging.DEBUG)
+# Log level is overridable at launch: ``GALLIARD_LOG_LEVEL=DEBUG ./bin/galliard``.
+# Accepts any standard logging name (DEBUG / INFO / WARNING / ERROR / CRITICAL);
+# an unknown value falls back to INFO with a warning.
+_log_level_name = os.environ.get("GALLIARD_LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, None)
+if not isinstance(_log_level, int):
+    logging.basicConfig(level=logging.INFO)
+    logging.warning("Unknown GALLIARD_LOG_LEVEL=%r, defaulting to INFO", _log_level_name)
+else:
+    logging.basicConfig(level=_log_level)
 
 # System tray and media-keys bindings are both optional; the app runs
 # without either if the system libraries aren't available.

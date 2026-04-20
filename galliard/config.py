@@ -54,7 +54,7 @@ class Config:
             with open(self.config_file, "w") as f:
                 json.dump(self.config, f, indent=4)
         except Exception as e:
-            print(f"Error saving config file: {e}")
+            logging.error("Error saving config file: %s", e)
 
     def get(self, key, default=None):
         """Look up ``key`` (supports ``a.b.c`` dotted paths)."""
