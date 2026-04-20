@@ -3,6 +3,7 @@
 import logging
 import gi
 
+from galliard.mpd_snapcast import DEFAULT_CONTROL_PORT as DEFAULT_SNAPCAST_PORT
 from galliard.utils.async_task_queue import AsyncUIHelper
 
 gi.require_version("Gtk", "4.0")
@@ -116,7 +117,7 @@ class PreferencesWindow(Adw.PreferencesDialog):
         snapcast_port_row = Adw.SpinRow(
             title="Snapcast Port",
             adjustment=Gtk.Adjustment(
-                value=self.config.get("snapcast.port", 1780),
+                value=self.config.get("snapcast.port", DEFAULT_SNAPCAST_PORT),
                 lower=1,
                 upper=65535,
                 step_increment=1
@@ -253,7 +254,7 @@ class PreferencesWindow(Adw.PreferencesDialog):
     def update_snapcast_client_list(self):
         """Ask MPDConn.snapcast for the current client list asynchronously."""
         host = self.config.get("snapcast.host", "localhost")
-        port = self.config.get("snapcast.port", 1705)
+        port = self.config.get("snapcast.port", DEFAULT_SNAPCAST_PORT)
 
         AsyncUIHelper.run_async_operation(
             self.app.mpd_conn.snapcast.get_clients,

@@ -17,6 +17,10 @@ except ImportError:
 else:
     HAS_SNAPCAST = True
 
+# Snapcast's JSON-RPC control channel listens here by default. (1780 is
+# the HTTP/websocket variant, which python-snapcast doesn't speak.)
+DEFAULT_CONTROL_PORT = 1705
+
 
 class SnapcastController:
     """Snapcast state + operations, owned by a parent :class:`MPDConn`.
@@ -59,7 +63,7 @@ class SnapcastController:
             return False
 
         host = self._mpd.config.get("snapcast.host", "localhost")
-        port = self._mpd.config.get("snapcast.port", 1780)
+        port = self._mpd.config.get("snapcast.port", DEFAULT_CONTROL_PORT)
 
         try:
             self.server = await snapcast.control.create_server(  # type: ignore
@@ -67,10 +71,10 @@ class SnapcastController:
             )
             self.clients = self._extract_clients(self.server)
             await self.select_client()
-            print(f"Connected to Snapcast server at {host}:{port}")
+            logging.debug("Connected to Snapcast server at %s:%s", host, port)
             return True
         except Exception as e:
-            print(f"Error connecting to Snapcast server: {e}")
+            logging.error("Error connecting to Snapcast server: %s", e)
             return False
 
     async def select_client(self) -> None:
@@ -86,8 +90,9 @@ class SnapcastController:
         if not client_id and self.server.clients:
             self.client = self.server.clients[0]
             self._mpd.config.set("snapcast.client_id", self.client.identifier)
-            print(
-                f"No Snapcast client selected, using {self.client.friendly_name}"
+            logging.info(
+                "No Snapcast client selected, using %s",
+                self.client.friendly_name,
             )
             return
 
@@ -95,10 +100,10 @@ class SnapcastController:
             if client.identifier == client_id:
                 self.client = client
                 self.volume = client.volume
-                print(f"Selected Snapcast client: {client.friendly_name}")
+                logging.debug("Selected Snapcast client: %s", client.friendly_name)
                 return
 
-        print(f"Selected Snapcast client '{client_id}' not found")
+        logging.warning("Selected Snapcast client '%s' not found", client_id)
         if self.server.clients:
             self.client = self.server.clients[0]
             self._mpd.config.set("snapcast.client_id", self.client.identifier)
@@ -106,14 +111,14 @@ class SnapcastController:
     async def set_volume(self, volume: int) -> bool:
         """Set the selected client's volume."""
         if not HAS_SNAPCAST:
-            print("Cannot set Snapcast volume: python-snapcast library not installed")
+            logging.error("Cannot set Snapcast volume: python-snapcast library not installed")
             return False
 
         if not self.client:
             if not self.server:
                 await self.connect()
             if not self.client:
-                print("No Snapcast client selected")
+                logging.warning("No Snapcast client selected")
                 return False
 
         try:
@@ -122,28 +127,28 @@ class SnapcastController:
             idle_add_once(self._mpd.emit, "volume-changed", volume)
             return True
         except Exception as e:
-            print(f"Error setting Snapcast volume: {e}")
+            logging.error("Error setting Snapcast volume: %s", e)
             await self.connect()
             return False
 
     async def get_volume(self) -> int | None:
         """Return the selected client's current volume, or None."""
         if not HAS_SNAPCAST:
-            print("Cannot get Snapcast volume: python-snapcast library not installed")
+            logging.error("Cannot get Snapcast volume: python-snapcast library not installed")
             return None
 
         if not self.client:
             if not self.server:
                 await self.connect()
             if not self.client:
-                print("No Snapcast client selected")
+                logging.warning("No Snapcast client selected")
                 return None
 
         try:
             self.volume = self.client.volume
             return self.volume
         except Exception as e:
-            print(f"Error getting Snapcast volume: {e}")
+            logging.error("Error getting Snapcast volume: %s", e)
             await self.connect()
             return None
 
@@ -154,13 +159,13 @@ class SnapcastController:
         before there's a persistent server connection.
         """
         if not HAS_SNAPCAST:
-            print("Cannot get Snapcast clients: python-snapcast library not installed")
+            logging.error("Cannot get Snapcast clients: python-snapcast library not installed")
             return False
 
         if host is None:
             host = self._mpd.config.get("snapcast.host", "localhost")
         if port is None:
-            port = int(self._mpd.config.get("snapcast.port", 1780))
+            port = int(self._mpd.config.get("snapcast.port", DEFAULT_CONTROL_PORT))
 
         try:
             server = await snapcast.control.create_server(  # type: ignore
@@ -172,5 +177,5 @@ class SnapcastController:
                 server.stop()
             return True
         except Exception as e:
-            print(f"Error getting Snapcast clients: {e}")
+            logging.error("Error getting Snapcast clients: %s", e)
             return False
