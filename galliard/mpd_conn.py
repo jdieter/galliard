@@ -16,8 +16,8 @@ from galliard.utils.glib import idle_add_once
 try:
     import mpd.asyncio
 except ImportError:
-    print("Error: python-mpd2 library with asyncio not found.")
-    print("Please install it with: pip install python-mpd2")
+    logging.error("python-mpd2 library with asyncio not found.")
+    logging.error("Please install it with: pip install python-mpd2")
     exit(1)
 
 from galliard.mpd_snapcast import HAS_SNAPCAST, SnapcastController  # noqa: E402
@@ -129,7 +129,7 @@ class MPDConn(GObject.Object):
                 BrokenPipeError,
                 OSError,
             ) as e:
-                print("MPD error:", e)
+                logging.error("MPD error: %s", e)
                 asyncio.create_task(self._schedule_reconnection())
                 if "Connection" in str(e):
                     idle_add_once(self.emit, "connection-error", "Connection lost")
@@ -145,7 +145,7 @@ class MPDConn(GObject.Object):
                 if not self.client.connected:
                     logging.debug(f"{cmd} aborted mid-flight by disconnect: {e}")
                     return None
-                print(f"Unexpected error executing {cmd}: {e}")
+                logging.error("Unexpected error executing %s: %s", cmd, e)
                 return None
 
     def connect_signal(self, signal_name, callback_func, *user_data):
@@ -232,7 +232,7 @@ class MPDConn(GObject.Object):
 
         while not self.stop_reconnecting.is_set():
             if not self.connected:
-                print("Attempting to reconnect to MPD server...")
+                logging.info("Attempting to reconnect to MPD server...")
 
                 await self._stop_monitoring_task()
 
@@ -241,13 +241,13 @@ class MPDConn(GObject.Object):
                 try:
                     self.client = mpd.asyncio.MPDClient()
                 except Exception as e:
-                    print(f"Error creating new MPD client: {e}")
+                    logging.error("Error creating new MPD client: %s", e)
 
                 if await self._connect(force_reconnect=True):
-                    print("Successfully reconnected to MPD server")
+                    logging.info("Successfully reconnected to MPD server")
                     return
                 else:
-                    print("Reconnection attempt failed")
+                    logging.debug("Reconnection attempt failed")
 
             try:
                 await asyncio.wait_for(
@@ -419,6 +419,20 @@ class MPDConn(GObject.Object):
             if item.get("album")
         ]
 
+    async def async_get_albums_by_albumartist(self, albumartist: str) -> list[Album]:
+        """Return every album whose ``albumartist`` tag matches."""
+        if not self.connected:
+            return []
+        result = (
+            await self._execute_command("list", "album", "albumartist", albumartist)
+            or []
+        )
+        return [
+            Album(title=item["album"], artist=albumartist)
+            for item in result
+            if item.get("album")
+        ]
+
     async def async_search(self, type: str, query: str) -> list[Song]:
         """Substring-search the library: ``search(type, query)``."""
         if not self.connected:
@@ -472,7 +486,7 @@ class MPDConn(GObject.Object):
                 key = self.image_cache.put(song_uri, binary_data, mime_type)
                 return binary_data, mime_type, key
         except Exception as e:
-            print(f"Error getting album art: {e}")
+            logging.error("Error getting album art: %s", e)
 
         return None, None, None
 
@@ -488,7 +502,7 @@ class MPDConn(GObject.Object):
                 return Song(**result[0])
             return None
         except Exception as e:
-            print(f"Error getting song details for {file_path}: {e}")
+            logging.error("Error getting song details for %s: %s", file_path, e)
             return None
 
     async def _stop_monitoring_task(self):
@@ -600,7 +614,7 @@ class MPDConn(GObject.Object):
         try:
             return await self._execute_command("lsinfo", directory_path) or []
         except Exception as e:
-            print(f"Error listing directory {directory_path}: {e}")
+            logging.error("Error listing directory %s: %s", directory_path, e)
             return []
 
     async def async_add_songs_to_playlist(self, song_uris: list[str]) -> bool:
@@ -616,7 +630,7 @@ class MPDConn(GObject.Object):
             idle_add_once(self.emit, "playlist-changed")
             return True
         except Exception as e:
-            print(f"Error adding songs to playlist: {e}")
+            logging.error("Error adding songs to playlist: %s", e)
             return False
 
     def supports_snapcast(self) -> bool:
@@ -630,7 +644,6 @@ class MPDConn(GObject.Object):
         last_volume_check = 0
 
         while not self.stop_monitoring.is_set() and self.connected:
-            print("checking MPD status...")
             try:
                 status = await self._execute_command("status")
                 if not status:
@@ -699,7 +712,7 @@ class MPDConn(GObject.Object):
                     pass
 
             except Exception as e:
-                print(f"Monitor error: {e}")
+                logging.error("Monitor error: %s", e)
                 if not self.stop_monitoring.is_set():
                     asyncio.create_task(self._schedule_reconnection())
                     idle_add_once(self.emit, "connection-error", "Connection lost")

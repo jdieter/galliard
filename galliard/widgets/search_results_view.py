@@ -6,6 +6,7 @@ from gi.repository import Gtk, Gio  # noqa: E402
 
 from galliard.models import FileItem  # noqa: E402
 from galliard.utils.album_art import fetch_art_async  # noqa: E402
+from galliard.utils.artists import group_artist_names  # noqa: E402
 from galliard.utils.async_task_queue import AsyncUIHelper  # noqa: E402
 from galliard.utils.glib import idle_add_once  # noqa: E402
 from galliard.utils.sorting import get_sort_key  # noqa: E402
@@ -181,7 +182,7 @@ class SearchResultsView(Gtk.ScrolledWindow):
             idle_add_once(self._build_results_tree_by_type, results_by_type, query)
 
         except Exception as e:
-            print(f"Error performing search: {e}")
+            logging.error("Error performing search: %s", e)
 
     def _build_results_tree_by_type(self, results_by_type, search_term):
         """Build the hierarchical results tree grouped by search type"""
@@ -213,7 +214,9 @@ class SearchResultsView(Gtk.ScrolledWindow):
             if search_type == "date":
                 children = self._build_date_hierarchy(unique_results, search_term)
             elif search_type == "artist":
-                children = self._build_artist_hierarchy(unique_results, search_term)
+                children = self._build_artist_hierarchy(
+                    unique_results, search_term, filter_to_search=True,
+                )
             elif search_type == "album":
                 children = self._build_album_hierarchy(unique_results, search_term)
             else:  # title
@@ -355,32 +358,63 @@ class SearchResultsView(Gtk.ScrolledWindow):
 
         return year_items
 
-    def _build_artist_hierarchy(self, songs, search_term):
-        """Build artist → album → song hierarchy"""
-        artists = {}
+    def _build_artist_hierarchy(self, songs, search_term, filter_to_search=False):
+        """Build artist → album → song hierarchy.
 
+        Raw artist *and* albumartist tags are both fed into
+        :func:`group_artist_names` so a song tagged with a compound
+        artist ("Alpha / Beta") or with a mismatched albumartist shows
+        up under every relevant display row. A song belongs to a row
+        when the row's alias set contains its raw artist tag or its
+        raw albumartist tag.
+
+        When ``filter_to_search`` is True, only rows whose display name
+        contains ``search_term`` (case-insensitive) are emitted --
+        prevents splitting ``"Chris / Steven"`` on a ``"steven"`` search
+        from surfacing ``"Chris"`` as its own row.
+        """
+        all_raws = []
+        seen_raws = set()
         for song in songs:
-            artist = song.get("albumartist")
-            if artist is None:
-                artist = song.get("artist")
-            if artist is None:
-                artist = "Unknown"
-            if artist not in artists:
-                artists[artist] = []
-            artists[artist].append(song)
+            for raw in (
+                song.get("artist") or "Unknown",
+                song.get("albumartist"),
+            ):
+                if raw and raw not in seen_raws:
+                    seen_raws.add(raw)
+                    all_raws.append(raw)
 
-        # Build FileItem tree
+        needle = search_term.casefold() if filter_to_search and search_term else None
+
         artist_items = []
-        for artist in sorted(artists.keys()):
+        groups = group_artist_names(all_raws)
+        for display, aliases in sorted(groups, key=lambda g: get_sort_key(g[0])):
+            if needle and needle not in display.casefold():
+                continue
+
+            alias_set = set(aliases)
+            bucket = []
+            seen_files = set()
+            for song in songs:
+                artist_raw = song.get("artist") or "Unknown"
+                aa_raw = song.get("albumartist")
+                in_track = artist_raw in alias_set
+                in_album = bool(aa_raw) and aa_raw in alias_set
+                if (in_track or in_album) and song.file not in seen_files:
+                    seen_files.add(song.file)
+                    bucket.append(song)
+
+            if not bucket:
+                continue
+
             artist_item = FileItem(
-                name=artist,
+                name=display,
                 path="",
                 icon_name="system-users-symbolic",
                 is_directory=True,
                 pixbuf=None,
             )
-            # Use _build_album_hierarchy for this artist's songs
-            artist_item.children = self._build_album_hierarchy(artists[artist], search_term)
+            artist_item.children = self._build_album_hierarchy(bucket, search_term)
             artist_items.append(artist_item)
 
         return artist_items
@@ -485,7 +519,7 @@ class SearchResultsView(Gtk.ScrolledWindow):
             if replace:
                 await self.mpd_conn.async_play(0)
         except Exception as e:
-            print(f"Error adding song to playlist {file_path}: {e}")
+            logging.error("Error adding song to playlist %s: %s", file_path, e)
 
     async def add_items_to_playlist(self, file_item, replace=False):
         """Add items (directory or hierarchy) to the playlist"""
@@ -503,7 +537,7 @@ class SearchResultsView(Gtk.ScrolledWindow):
             if replace:
                 await self.mpd_conn.async_play(0)
         except Exception as e:
-            print(f"Error adding items to playlist: {e}")
+            logging.error("Error adding items to playlist: %s", e)
 
     def _collect_all_songs(self, file_item):
         """Recursively collect all song paths from a file item and its children"""

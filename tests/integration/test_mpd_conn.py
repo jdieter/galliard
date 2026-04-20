@@ -192,3 +192,17 @@ class TestAsyncQueries:
             "artist", "A", "album", "B"
         )
         assert songs[0].title == "X"
+
+    async def test_async_get_albums_by_albumartist_uses_albumartist_tag(
+        self, recording_conn
+    ):
+        recording_conn.connected = True
+        recording_conn.client.list.return_value = [{"album": "Live at the Burrow"}]
+        albums = await recording_conn.async_get_albums_by_albumartist(
+            "Wombat Philharmonic"
+        )
+        recording_conn.client.list.assert_awaited_once_with(
+            "album", "albumartist", "Wombat Philharmonic"
+        )
+        assert [a.title for a in albums] == ["Live at the Burrow"]
+        assert albums[0].artist == "Wombat Philharmonic"

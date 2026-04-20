@@ -1,3 +1,5 @@
+import logging
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -6,11 +8,25 @@ from gi.repository import Gtk, Gdk, Gio  # noqa: E402
 from galliard.models import Artist, Album, Song  # noqa: E402
 from galliard.utils.sorting import get_sort_key  # noqa: E402
 from galliard.utils.album_art import get_album_art_as_pixbuf  # noqa: E402
+from galliard.utils.artists import group_artist_names  # noqa: E402
 from galliard.utils.async_task_queue import AsyncUIHelper  # noqa: E402
 from galliard.utils.context_menu import ContextMenu  # noqa: E402
 from galliard.utils.glib import idle_add_once  # noqa: E402
 from galliard.utils.gtk_styling import apply_compact_tree_css  # noqa: E402
 from galliard.widgets.mpd_item_row import build_compact_tree_row  # noqa: E402
+
+
+def _compare_albums_by_year_then_title(a, b, user_data):
+    """Sort albums by year (unknown last), then case-insensitive title."""
+    year_a = a.year if a.year is not None else 9999
+    year_b = b.year if b.year is not None else 9999
+    if year_a != year_b:
+        return -1 if year_a < year_b else 1
+    title_a = (a.title or "").casefold()
+    title_b = (b.title or "").casefold()
+    if title_a == title_b:
+        return 0
+    return -1 if title_a < title_b else 1
 
 
 class ArtistsView(Gtk.ScrolledWindow):
@@ -112,7 +128,7 @@ class ArtistsView(Gtk.ScrolledWindow):
             list_item.play_button.set_visible(False)
 
         if isinstance(item, Artist):
-            list_item.image.set_from_icon_name("performer-symbolic")
+            list_item.image.set_from_icon_name("avatar-default-symbolic")
             list_item.label.set_text(item.name)
         elif isinstance(item, Album):
             if item.pixbuf:
@@ -156,21 +172,27 @@ class ArtistsView(Gtk.ScrolledWindow):
         return None
 
     def _create_artist_children_model(self, artist_item):
-        """Create model for artist's albums"""
+        """Create a year-then-title sorted model of ``artist_item``'s albums.
+
+        Wraps the underlying Gio.ListStore in a Gtk.SortListModel whose
+        sorter is stashed on the artist so :meth:`_update_album_art_and_year`
+        can trigger a re-sort once a year backfills in.
+        """
         if not isinstance(artist_item, Artist):
             return None
 
-        # Create a list store for albums
         child_store = Gio.ListStore.new(Album)
+        sorter = Gtk.CustomSorter.new(_compare_albums_by_year_then_title, None)
+        sort_model = Gtk.SortListModel.new(child_store, sorter)
+
+        artist_item.child_store = child_store
+        artist_item.child_sorter = sorter
 
         if not artist_item.children_loaded:
-            # Load albums asynchronously
             AsyncUIHelper.run_async_operation(
                 self._load_artist_albums,
-                lambda result: self._update_artist_albums(
-                    artist_item, result, child_store
-                ),
-                artist_item.name,
+                lambda result: self._update_artist_albums(artist_item, result),
+                list(artist_item.aliases),
             )
 
             # Show a spinner row until the real album list arrives.
@@ -184,79 +206,145 @@ class ArtistsView(Gtk.ScrolledWindow):
             for album in artist_item.albums:
                 child_store.append(album)
 
-        return child_store
+        return sort_model
 
-    async def _load_artist_albums(self, artist_name):
-        """Return a year-sorted list of Albums for ``artist_name``.
+    async def _load_artist_albums(self, aliases):
+        """Return the Albums an artist display row should present.
 
-        Kicks off a per-album background task to fetch cover art and the
-        release year; those fill in asynchronously via
-        :meth:`_update_album_art_and_year`.
+        Two passes:
+
+        * ``list album albumartist <alias>`` for each alias marks the
+          returned albums as *owned* -- the display row is this album's
+          album artist, so later track fetches will include every song
+          on the album regardless of individual track-artist tags.
+        * ``list album artist <alias>`` then folds in albums where a
+          track on the album names the artist even though the album
+          itself belongs to someone else (a guest/featured appearance).
+          These stay *not owned*, so only the matching tracks show.
+
+        Albums are deduped by case-folded title, and
+        ``album.artist_aliases`` records every raw MPD tag string that
+        contributed so later song/art fetches can re-union across
+        variants.
         """
+        seen = {}
         try:
-            albums = await self.mpd_client.async_get_albums_by_artist(artist_name)
+            for alias in aliases:
+                owned = await self.mpd_client.async_get_albums_by_albumartist(alias)
+                for album in owned:
+                    key = (album.title or "").casefold()
+                    if key not in seen:
+                        album.artist_aliases = [alias]
+                        album.is_owned = True
+                        seen[key] = album
+                    else:
+                        seen[key].is_owned = True
+                        if alias not in seen[key].artist_aliases:
+                            seen[key].artist_aliases.append(alias)
+
+            for alias in aliases:
+                guest = await self.mpd_client.async_get_albums_by_artist(alias)
+                for album in guest:
+                    key = (album.title or "").casefold()
+                    if key not in seen:
+                        album.artist_aliases = [alias]
+                        album.is_owned = False
+                        seen[key] = album
+                    elif alias not in seen[key].artist_aliases:
+                        seen[key].artist_aliases.append(alias)
         except Exception as e:
-            print(f"Error loading albums for {artist_name}: {e}")
+            logging.error("Error loading albums for %s: %s", aliases, e)
             return []
+
+        return list(seen.values())
+
+    def _update_artist_albums(self, artist, albums):
+        """Replace ``artist``'s loading placeholder with the real album list.
+
+        The enclosing SortListModel orders by ``(year, title)``; years
+        fill in later via :meth:`_update_album_art_and_year`, which
+        nudges the sorter to re-evaluate.
+        """
+        artist.albums = albums
+        artist.children_loaded = True
+
+        artist.child_store.remove_all()
+        for album in albums:
+            artist.child_store.append(album)
 
         for album in albums:
             AsyncUIHelper.run_async_operation(
                 self._load_album_art_and_year,
-                lambda result, album=album: self._update_album_art_and_year(
-                    album, result
+                lambda result, album=album, artist=artist: (
+                    self._update_album_art_and_year(album, result, artist)
                 ),
-                artist_name,
+                list(album.artist_aliases),
                 album.title,
+                album.is_owned,
                 task_priority=110,
             )
 
-        albums.sort(key=lambda album: album.year if album.year else 9999)
-        return albums
-
-    def _update_artist_albums(self, artist, albums, child_store):
-        """Replace ``artist``'s loading placeholder with the real album list."""
-        artist.albums = albums
-        artist.children_loaded = True
-
-        child_store.remove_all()
-
-        for album in artist.albums:
-            child_store.append(album)
-
         idle_add_once(lambda: self.artists_tree.queue_draw())
 
-    async def _load_album_art_and_year(self, artist_name, album_name):
-        """Fetch ``(pixbuf, year, songs)`` for an album using its first song."""
+    async def _load_album_art_and_year(self, aliases, album_name, is_owned):
+        """Fetch ``(pixbuf, year, songs)`` for a single album row.
+
+        When ``is_owned`` is True the album's ``albumartist`` is one of
+        ``aliases``, so every track is fetched via ``albumartist`` --
+        guest tracks with mismatched track artists still belong to the
+        album. Otherwise the artist is only a featured guest and only
+        tracks whose ``artist`` tag matches an alias are pulled in.
+        """
         try:
-            songs = await self.mpd_client.async_find(
-                "artist", artist_name, "album", album_name
-            )
-            if songs:
-                song = songs[0]
-                pixbuf = await get_album_art_as_pixbuf(
-                    self.mpd_client, song.file, 200
+            all_songs = []
+            seen_files = set()
+            tag = "albumartist" if is_owned else "artist"
+            for alias in aliases:
+                songs = await self.mpd_client.async_find(
+                    tag, alias, "album", album_name
                 )
+                for song in songs or []:
+                    if song.file not in seen_files:
+                        seen_files.add(song.file)
+                        all_songs.append(song)
 
-                # MPD's date tag can be "YYYY" or "YYYY-MM-DD"; take the year.
-                year = None
-                date = song.get("date")
-                if date:
-                    year_str = str(date).split("-")[0].strip()
-                    if year_str.isdigit():
-                        year = int(year_str)
+            if not all_songs:
+                return None, None, []
 
-                return pixbuf, year, songs
+            pixbuf = await get_album_art_as_pixbuf(
+                self.mpd_client, all_songs[0].file, 200
+            )
+
+            # MPD's date tag can be "YYYY" or "YYYY-MM-DD"; take the year.
+            year = None
+            date = all_songs[0].get("date")
+            if date:
+                year_str = str(date).split("-")[0].strip()
+                if year_str.isdigit():
+                    year = int(year_str)
+
+            return pixbuf, year, all_songs
         except Exception as e:
-            print(f"Error loading art for {artist_name} - {album_name}: {e}")
+            logging.error(
+                "Error loading art for %s - %s: %s", aliases, album_name, e
+            )
 
         return None, None, []
 
-    def _update_album_art_and_year(self, album, result):
-        """Back-fill ``album``'s fetched metadata onto the already-shown row."""
+    def _update_album_art_and_year(self, album, result, artist):
+        """Back-fill ``album``'s fetched metadata onto the already-shown row.
+
+        Notifies the parent artist's sorter so the new year bumps the
+        album into the right slot.
+        """
         pixbuf, year, songs = result
         album.pixbuf = pixbuf
         album.year = year
         album.songs = songs
+
+        sorter = getattr(artist, "child_sorter", None)
+        if sorter is not None:
+            sorter.changed(Gtk.SorterChange.DIFFERENT)
 
         if hasattr(album, "list_item") and album.list_item:
             if pixbuf:
@@ -324,7 +412,9 @@ class ArtistsView(Gtk.ScrolledWindow):
         item = tree_list_row.get_item()
 
         if isinstance(item, Artist):
-            AsyncUIHelper.run_async_operation(self._play_artist_songs, None, item.name)
+            AsyncUIHelper.run_async_operation(
+                self._play_artist_songs, None, list(item.aliases)
+            )
         elif isinstance(item, Album):
             AsyncUIHelper.run_async_operation(self._play_album_songs, None, item)
 
@@ -430,7 +520,7 @@ class ArtistsView(Gtk.ScrolledWindow):
         """Dispatch the chosen Append/Replace action to the right player method."""
         if isinstance(item, Artist):
             AsyncUIHelper.run_async_operation(
-                self._play_artist_songs, None, item.name, replace
+                self._play_artist_songs, None, list(item.aliases), replace
             )
         elif isinstance(item, Album):
             AsyncUIHelper.run_async_operation(
@@ -439,22 +529,43 @@ class ArtistsView(Gtk.ScrolledWindow):
         elif isinstance(item, Song):
             AsyncUIHelper.run_async_operation(self._play_song, None, item.file, replace)
 
-    async def _play_artist_songs(self, artist_name, replace=True):
-        """Queue every song by ``artist_name``; replace + autoplay when asked."""
+    async def _play_artist_songs(self, aliases, replace=True):
+        """Queue every song that belongs under this artist row.
+
+        Unions tracks from owned albums (``albumartist`` match → every
+        track on the album, including guest features) with guest-only
+        tracks (``artist`` match on albums someone else headlines),
+        deduped by file path.
+        """
         try:
             if replace:
                 await self.mpd_client.async_clear_playlist()
 
-            songs = await self.mpd_client.async_get_songs_by_artist(artist_name)
-            if songs:
+            seen_files = set()
+            ordered = []
+            for alias in aliases:
+                for song in await self.mpd_client.async_find(
+                    "albumartist", alias
+                ) or []:
+                    if song.file not in seen_files:
+                        seen_files.add(song.file)
+                        ordered.append(song)
+                for song in await self.mpd_client.async_get_songs_by_artist(
+                    alias
+                ) or []:
+                    if song.file not in seen_files:
+                        seen_files.add(song.file)
+                        ordered.append(song)
+
+            if ordered:
                 await self.mpd_client.async_add_songs_to_playlist(
-                    [song.file for song in songs]
+                    [song.file for song in ordered]
                 )
 
                 if replace:
                     await self.mpd_client.async_play(0)
         except Exception as e:
-            print(f"Error playing artist songs: {e}")
+            logging.error("Error playing artist songs: %s", e)
 
     async def _play_album_songs(self, album, replace=True):
         """Queue ``album``'s songs in track order; replace + autoplay when asked."""
@@ -462,9 +573,18 @@ class ArtistsView(Gtk.ScrolledWindow):
             if replace:
                 await self.mpd_client.async_clear_playlist()
 
-            songs = await self.mpd_client.async_find(
-                "artist", album.artist, "album", album.title
-            )
+            aliases = album.artist_aliases or ([album.artist] if album.artist else [])
+            tag = "albumartist" if album.is_owned else "artist"
+            seen_files = set()
+            songs = []
+            for alias in aliases:
+                for song in await self.mpd_client.async_find(
+                    tag, alias, "album", album.title
+                ) or []:
+                    if song.file not in seen_files:
+                        seen_files.add(song.file)
+                        songs.append(song)
+
             if songs:
                 def track_sort_key(song):
                     track = song.get("track")
@@ -482,7 +602,7 @@ class ArtistsView(Gtk.ScrolledWindow):
                 if replace:
                     await self.mpd_client.async_play(0)
         except Exception as e:
-            print(f"Error playing album songs: {e}")
+            logging.error("Error playing album songs: %s", e)
 
     async def _play_song(self, file_path, replace=True):
         """Queue a single song; replace + autoplay when asked."""
@@ -494,26 +614,36 @@ class ArtistsView(Gtk.ScrolledWindow):
 
             self.mpd_client.client.play(0 if replace else -1)
         except Exception as e:
-            print(f"Error playing song: {e}")
+            logging.error("Error playing song: %s", e)
 
     async def load_artists(self):
-        """Populate ``self.artists_store`` with every artist in the library."""
+        """Populate ``self.artists_store`` with every artist in the library.
+
+        Raw MPD artist tags are split on ' / ' and merged case-insensitively
+        (see :func:`group_artist_names`) so compound tags like
+        ``"Simon / Garfunkel"`` become two browseable rows and stray
+        capitalisation variants collapse into one.
+        """
         if not self.mpd_client.is_connected():
             return False
 
         try:
             self.artists_store.remove_all()
 
-            artists = await self.mpd_client.async_get_artists()
-            if artists:
+            raw_artists = await self.mpd_client.async_get_artists()
+            if raw_artists:
+                groups = group_artist_names(a.name for a in raw_artists)
+                artists = [
+                    Artist(name=display, aliases=aliases)
+                    for display, aliases in groups
+                ]
                 artists.sort(key=lambda artist: get_sort_key(artist.name))
                 for artist in artists:
-                    if artist.name:
-                        self.artists_store.append(artist)
+                    self.artists_store.append(artist)
 
             idle_add_once(lambda: self.artists_tree.queue_draw())
         except Exception as e:
-            print(f"Error loading artists: {e}")
+            logging.error("Error loading artists: %s", e)
 
         return False
 

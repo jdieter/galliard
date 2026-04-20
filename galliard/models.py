@@ -5,9 +5,14 @@ from gi.repository import GObject
 class Artist(GObject.GObject):
     """GObject wrapper for artist data"""
 
-    def __init__(self, name):
+    def __init__(self, name, aliases=None):
         super().__init__()
         self.name = name
+        # Raw MPD artist strings this display row represents. Needed so
+        # split-and-merged rows (e.g. "Simon" pulled out of "Simon /
+        # Garfunkel", or "The Beatles" unified with "the beatles") can
+        # query every underlying tag value.
+        self.aliases = list(aliases) if aliases else [name]
         self.albums = []
         self.children_loaded = False
         self.list_item = None
@@ -20,6 +25,14 @@ class Album(GObject.GObject):
         super().__init__()
         self.title = title
         self.artist = artist
+        # Raw MPD artist strings this album lives under -- an album can
+        # appear below multiple aliases after the artists view merges
+        # case-variant duplicates.
+        self.artist_aliases = [artist] if artist else []
+        # True when the displayed artist row owns this album (matches its
+        # albumartist tag). Owned albums show every track; guest-only
+        # entries show just the matching tracks.
+        self.is_owned = False
         self.icon_name = icon_name
         self.pixbuf = pixbuf
         self.year = None

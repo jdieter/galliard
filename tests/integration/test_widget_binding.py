@@ -163,7 +163,7 @@ class TestArtistsViewBind:
         artist = Artist("Radiohead")
         list_item = _list_item(_tree_row(artist))
         artists_view._item_bind(None, list_item)
-        list_item.image.set_from_icon_name.assert_called_with("performer-symbolic")
+        list_item.image.set_from_icon_name.assert_called_with("avatar-default-symbolic")
         list_item.label.set_text.assert_called_with("Radiohead")
         # Artists are expandable -> expander + play button visible.
         list_item.expander.set_visible.assert_called_with(True)
@@ -239,6 +239,68 @@ class TestArtistsViewChildrenModels:
         assert artists_view._create_children_model(Artist("A")) is not None
         assert artists_view._create_children_model(Album(title="A")) is not None
         assert artists_view._create_children_model(Song(file="a.mp3")) is None
+
+    def test_album_children_model_sorts_by_year_then_title(self, artists_view):
+        """Loaded albums are ordered (year, title), unknown year last."""
+        a = Album(title="Later")
+        a.year = 2001
+        b = Album(title="Earlier")
+        b.year = 1999
+        c = Album(title="No Year")  # year stays None -> sorts last
+        d = Album(title="Also 2001")
+        d.year = 2001
+        artist = Artist("X")
+        artist.children_loaded = True
+        artist.albums = [a, c, b, d]
+        model = artists_view._create_artist_children_model(artist)
+        titles = [model.get_item(i).title for i in range(model.get_n_items())]
+        # 1999 first, then 2001 albums alphabetically, then year-less.
+        assert titles == ["Earlier", "Also 2001", "Later", "No Year"]
+
+
+class TestArtistAlbumOwnership:
+    """Albums discovered via albumartist are owned; artist-only are guests."""
+
+    async def test_owned_album_marked(self, artists_view):
+        from unittest.mock import AsyncMock
+
+        artists_view.mpd_client = AsyncMock()
+        artists_view.mpd_client.async_get_albums_by_albumartist.return_value = [
+            Album(title="Home Turf", artist="Wombat Philharmonic"),
+        ]
+        artists_view.mpd_client.async_get_albums_by_artist.return_value = []
+
+        albums = await artists_view._load_artist_albums(["Wombat Philharmonic"])
+        assert len(albums) == 1
+        assert albums[0].is_owned is True
+
+    async def test_guest_only_album_marked_not_owned(self, artists_view):
+        from unittest.mock import AsyncMock
+
+        artists_view.mpd_client = AsyncMock()
+        artists_view.mpd_client.async_get_albums_by_albumartist.return_value = []
+        artists_view.mpd_client.async_get_albums_by_artist.return_value = [
+            Album(title="Compilation", artist="Dancing Potatoes"),
+        ]
+
+        albums = await artists_view._load_artist_albums(["Dancing Potatoes"])
+        assert len(albums) == 1
+        assert albums[0].is_owned is False
+
+    async def test_album_present_under_both_lists_is_owned(self, artists_view):
+        from unittest.mock import AsyncMock
+
+        artists_view.mpd_client = AsyncMock()
+        artists_view.mpd_client.async_get_albums_by_albumartist.return_value = [
+            Album(title="Self Title", artist="Quantum Ferrets"),
+        ]
+        artists_view.mpd_client.async_get_albums_by_artist.return_value = [
+            Album(title="Self Title", artist="Quantum Ferrets"),
+        ]
+
+        albums = await artists_view._load_artist_albums(["Quantum Ferrets"])
+        assert len(albums) == 1
+        assert albums[0].is_owned is True
 
 
 # ---------------------------------------------------------------------------
